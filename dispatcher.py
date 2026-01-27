@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import shutil
 import time
 
@@ -10,6 +11,26 @@ class FleetDispatcher:
         self.config = config
         self.get_sys_path = get_sys_path
         self.logger = logger
+        self.deficits = {}
+        self.key_order = []
+        self.last_index = -1
+
+    def _load_weights(self):
+        root = self.config.get("syncthing_root") or "~/RenderFleet"
+        root = os.path.abspath(os.path.expanduser(root))
+        settings_path = os.path.join(root, "_system", "settings.json")
+        weights_cfg = self.config.get("weights", {}) or {}
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                if isinstance(settings, dict) and "weights" in settings:
+                    weights_cfg = settings.get("weights", weights_cfg) or weights_cfg
+            except (OSError, json.JSONDecodeError):
+                pass
+        if "default" not in weights_cfg:
+            weights_cfg["default"] = 1
+        return weights_cfg
 
     def check_dead_workers(self, heartbeat_dir, active_floor_path, job_queue_path):
         hb_files = []
@@ -127,41 +148,63 @@ class FleetDispatcher:
             return None
 
         for job in jobs:
-            name = os.path.basename(job).lower()
-            if "vip" in name or "urgent" in name:
+            name = os.path.basename(job)
+            if re.search(r"(vip|urgent)", name, re.IGNORECASE):
                 self.logger(f"DEBUG: Selected VIP job: {os.path.basename(job)}")
                 return job
 
-        weights_cfg = config_weights or {}
-        default_weight = weights_cfg.get("default", 1)
+        weights_cfg = self._load_weights()
+        default_weight = int(weights_cfg.get("default", 1))
         keys = [k for k in weights_cfg.keys() if k != "default"]
 
-        weighted_jobs = []
-        total = 0
+        buckets = {k: [] for k in keys}
+        buckets["default"] = []
+
         for job in jobs:
-            name = os.path.basename(job).lower()
-            weight = default_weight
+            name = os.path.basename(job)
+            matched_key = "default"
+            matched_weight = default_weight
             for key in keys:
-                if key.lower() in name:
-                    weight = weights_cfg.get(key, default_weight)
-                    break
-            weight = max(0, int(weight))
-            weighted_jobs.append((job, weight))
-            total += weight
+                if re.search(rf"\\b{re.escape(key)}\\b", name, re.IGNORECASE):
+                    weight = int(weights_cfg.get(key, default_weight))
+                    if weight > matched_weight:
+                        matched_key = key
+                        matched_weight = weight
+            self.logger(
+                f"DEBUG: Matching {name} -> Category: {matched_key} (Weight: {matched_weight})"
+            )
+            buckets.setdefault(matched_key, []).append(job)
 
-        if total <= 0:
-            return random.choice(jobs)
+        self.key_order = [k for k in keys] + ["default"]
+        if not self.key_order:
+            self.key_order = ["default"]
 
-        pick = random.randint(1, total)
-        running = 0
-        for job, weight in weighted_jobs:
-            running += weight
-            if pick <= running:
+        for key in self.key_order:
+            self.deficits.setdefault(key, 0)
+
+        checked = 0
+        total_keys = len(self.key_order)
+        while checked < total_keys:
+            self.last_index = (self.last_index + 1) % total_keys
+            key = self.key_order[self.last_index]
+            quantum = int(weights_cfg.get(key, default_weight))
+            self.deficits[key] += max(0, quantum)
+            if buckets.get(key) and self.deficits[key] >= 1:
+                job = buckets[key].pop(0)
+                self.deficits[key] -= 1
+                self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
+                return job
+            checked += 1
+
+        for key in self.key_order:
+            self.deficits[key] += int(weights_cfg.get(key, default_weight))
+            if buckets.get(key) and self.deficits[key] >= 1:
+                job = buckets[key].pop(0)
+                self.deficits[key] -= 1
                 self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
                 return job
 
-        self.logger(f"DEBUG: Selected job: {os.path.basename(jobs[0])}")
-        return jobs[0]
+        return None
 
     def enforce_vip_preemption(self, queue_path, active_floor_path):
         try:
