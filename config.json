@@ -6,8 +6,8 @@
     "staging_area": "~/RenderFleet/_system/staging_area",
     "staging_prompts": "~/RenderFleet/_system/staging_prompts",
     "scripts": {
-        "img_gen": "/home/user/RenderFleet_Code/scripts/image_gen_dummy.ascr",
-        "vid_gen": "/home/user/RenderFleet_Code/scripts/video_gen_dummy.ascr",
+        "img_gen": "/home/worker001/RenderFleet_Code/scripts/image_gen_dummy.ascr",
+        "vid_gen": "/home/worker001/RenderFleet_Code/scripts/video_gen_dummy.ascr",
         "dry_run": true
     },
     "weights": {
