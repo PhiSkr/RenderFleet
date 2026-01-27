@@ -23,10 +23,14 @@ def load_config():
         print(f"❌ ERROR loading config at {config_path}: {e}")
         raise
 
-    if "scripts" not in config or "syncthing_root" not in config:
-        print("⚠️ WARNING: config.json missing critical keys (scripts/syncthing_root).")
-
-    if not os.path.exists(local_config_path):
+    local_data = {}
+    if os.path.exists(local_config_path):
+        try:
+            with open(local_config_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            local_data = {}
+    else:
         local_data = {
             "worker_id": config.get("worker_id"),
             "initial_role": config.get("initial_role"),
@@ -36,12 +40,6 @@ def load_config():
                 json.dump(local_data, f, indent=4)
         except OSError:
             pass
-    else:
-        try:
-            with open(local_config_path, "r", encoding="utf-8") as f:
-                local_data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            local_data = {}
 
     config.update(local_data)
 
@@ -49,6 +47,9 @@ def load_config():
         config["paused"] = False
     if "weights" not in config:
         config["weights"] = {"default": 10}
+
+    if "scripts" not in config:
+        raise KeyError("scripts missing from merged config")
 
     print(f"DEBUG: Config merged. Keys: {list(config.keys())}")
     print(
