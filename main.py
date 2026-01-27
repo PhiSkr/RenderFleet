@@ -51,10 +51,13 @@ def send_heartbeat(config, status="IDLE", current_job=None):
         "current_job": current_job,
     }
 
-    hb_path = get_sys_path(os.path.join("_system", "heartbeats", f"{heartbeat['worker_id']}.json"))
+    hb_folder = config.get("heartbeat_path", "")
+    hb_folder = os.path.expanduser(hb_folder)
+    if not os.path.isabs(hb_folder):
+        hb_folder = os.path.abspath(hb_folder)
+    os.makedirs(hb_folder, exist_ok=True)
+    hb_path = os.path.join(hb_folder, f"{heartbeat['worker_id']}.json")
     print(f"DEBUG: Writing Heartbeat to: '{hb_path}'")
-    hb_dir = os.path.dirname(hb_path)
-    os.makedirs(hb_dir, exist_ok=True)
 
     with open(hb_path, "w", encoding="utf-8") as f:
         json.dump(heartbeat, f, indent=4)
