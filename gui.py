@@ -58,7 +58,7 @@ class WorkerCard(ctk.CTkFrame):
             width=110,
             height=26,
             fg_color="green",
-            command=lambda: self.send_command(worker_id, "start"),
+            command=lambda: self.send_command(worker_id, "unpause"),
             state=btn_state,
         )
         start_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
@@ -69,7 +69,7 @@ class WorkerCard(ctk.CTkFrame):
             width=110,
             height=26,
             fg_color="red",
-            command=lambda: self.send_command(worker_id, "stop"),
+            command=lambda: self.send_command(worker_id, "pause"),
             state=btn_state,
         )
         stop_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")

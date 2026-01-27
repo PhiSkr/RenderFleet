@@ -77,6 +77,25 @@ def process_command_file(file_path, config):
         return
     print(f"⚡ COMMAND RECEIVED: {data}")
     action = data.get("action")
+    new_role = None
+    if "role" in data:
+        new_role = data.get("role")
+    elif action == "set_role":
+        new_role = data.get("role") or data.get("value")
+    if new_role:
+        config["initial_role"] = new_role
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg_on_disk = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg_on_disk = {}
+        cfg_on_disk["initial_role"] = new_role
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(cfg_on_disk, f, indent=4)
+        except OSError:
+            pass
+        print(f"🔄 ROLE CHANGED: Now acting as {new_role}")
     if action == "stop":
         print("🛑 STOPPING...")
         try:
