@@ -5,6 +5,7 @@
     "landing_zone": "~/RenderFleet/_system/landing_zone",
     "staging_area": "~/RenderFleet/_system/staging_area",
     "staging_prompts": "~/RenderFleet/_system/staging_prompts",
+    "display": ":1",
     "scripts": {
         "img_gen": "/home/worker001/RenderFleet_Code/scripts/image_gen_dummy.ascr",
         "vid_gen": "/home/worker001/RenderFleet_Code/scripts/video_gen_dummy.ascr",
