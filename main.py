@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import threading
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from dispatcher import FleetDispatcher
@@ -139,6 +140,19 @@ def check_yield_command(config):
     except OSError:
         pass
     return True
+
+
+def dispatcher_loop(config):
+    dispatcher = FleetDispatcher(config, get_sys_path)
+    while True:
+        role = config.get("initial_role", "")
+        if role.endswith("_lead"):
+            dispatcher.recover_dead_workers()
+            img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
+            active_floor = get_sys_path("02_active_floor")
+            dispatcher.enforce_vip_preemption(img_queue, active_floor)
+            dispatcher.dispatch_smart()
+        time.sleep(15)
 
 
 def process_command_file(file_path, config):
@@ -351,6 +365,7 @@ def process_jobs(config):
                         )
                 except OSError:
                     pass
+            print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
                 img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
@@ -441,6 +456,7 @@ def process_jobs(config):
                         )
                 except OSError:
                     pass
+            print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
@@ -593,7 +609,10 @@ def run_actiona(
 
 def main():
     print("🚀 RenderFleet Worker started...")
-    dispatcher = FleetDispatcher(CONFIG, get_sys_path)
+    dispatcher_thread = threading.Thread(
+        target=dispatcher_loop, args=(CONFIG,), daemon=True
+    )
+    dispatcher_thread.start()
     observer = Observer()
     inbox = CONFIG["inbox_path"]
     cmds = CONFIG["command_path"]
@@ -623,11 +642,6 @@ def main():
                 send_heartbeat(CONFIG, status="PAUSED")
                 time.sleep(2)
                 continue
-            dispatcher.recover_dead_workers()
-            img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
-            active_floor = get_sys_path("02_active_floor")
-            dispatcher.enforce_vip_preemption(img_queue, active_floor)
-            dispatcher.dispatch_smart()
             did_work = process_jobs(CONFIG)
             if did_work:
                 continue
