@@ -67,11 +67,44 @@ def send_heartbeat(config, status="IDLE", current_job=None):
     print(f"♥ Heartbeat sent: {status}")
 
 
+def process_command_file(file_path, config):
+    if os.path.basename(file_path) != f"{config.get('worker_id')}.cmd":
+        return
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    print(f"⚡ COMMAND RECEIVED: {data}")
+    action = data.get("action")
+    if action == "stop":
+        print("🛑 STOPPING...")
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+        sys.exit(0)
+    if action == "pause":
+        config["paused"] = True
+    elif action == "unpause":
+        config["paused"] = False
+    try:
+        os.remove(file_path)
+    except OSError:
+        pass
+
+
 class RenderFleetHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
         print(f"⚡ EVENT DETECTED: {event.src_path}")
+        process_command_file(event.src_path, CONFIG)
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        process_command_file(event.src_path, CONFIG)
 
 
 def check_commands(config):
@@ -412,6 +445,9 @@ def main():
     observer.schedule(RenderFleetHandler(), cmds, recursive=False)
     print(f"DEBUG: 👀 Watching INBOX at: '{inbox}'")
     print(f"DEBUG: 👀 Watching COMMANDS at: '{cmds}'")
+    startup_cmd = os.path.join(cmds, f"{CONFIG.get('worker_id')}.cmd")
+    if os.path.exists(startup_cmd):
+        process_command_file(startup_cmd, CONFIG)
     observer.start()
     try:
         while True:
