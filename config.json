@@ -9,5 +9,10 @@
         "img_gen": "/home/user/RenderFleet_Code/scripts/image_gen_dummy.ascr",
         "vid_gen": "/home/user/RenderFleet_Code/scripts/video_gen_dummy.ascr",
         "dry_run": true
+    },
+    "weights": {
+        "default": 10,
+        "vip": 100,
+        "background": 200
     }
 }

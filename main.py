@@ -8,6 +8,7 @@ import sys
 import time
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from dispatcher import FleetDispatcher
 
 
 def load_config():
@@ -22,6 +23,8 @@ def load_config():
         raise
     if "paused" not in data:
         data["paused"] = False
+    if "weights" not in data:
+        data["weights"] = {"default": 10}
     return data
 
 
@@ -67,6 +70,32 @@ def send_heartbeat(config, status="IDLE", current_job=None):
     print(f"♥ Heartbeat sent: {status}")
 
 
+def check_yield_command(config):
+    worker_id = config.get("worker_id")
+    if not worker_id:
+        return False
+    cmd_root = config.get("command_path")
+    if cmd_root:
+        cmd_root = os.path.abspath(os.path.expanduser(cmd_root))
+    else:
+        cmd_root = get_sys_path(os.path.join("_system", "commands"))
+    cmd_path = os.path.join(cmd_root, f"{worker_id}.cmd")
+    if not os.path.exists(cmd_path):
+        return False
+    try:
+        with open(cmd_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if data.get("action") != "yield":
+        return False
+    try:
+        os.remove(cmd_path)
+    except OSError:
+        pass
+    return True
+
+
 def process_command_file(file_path, config):
     if os.path.basename(file_path) != f"{config.get('worker_id')}.cmd":
         return
@@ -77,6 +106,8 @@ def process_command_file(file_path, config):
         return
     print(f"⚡ COMMAND RECEIVED: {data}")
     action = data.get("action")
+    if action == "yield":
+        return
     new_role = None
     if "role" in data:
         new_role = data.get("role")
@@ -234,6 +265,14 @@ def process_jobs(config):
         job_name = os.path.splitext(filename)[0]
         target_dir = os.path.join(review_path, job_name)
         os.makedirs(target_dir, exist_ok=True)
+        progress_path = os.path.join(target_dir, "progress.json")
+        completed = []
+        try:
+            with open(progress_path, "r", encoding="utf-8") as f:
+                progress_data = json.load(f)
+                completed = progress_data.get("completed_files", [])
+        except (OSError, json.JSONDecodeError):
+            completed = []
 
         prompt_index = 0
         for line in lines:
@@ -241,15 +280,37 @@ def process_jobs(config):
             if not prompt:
                 continue
             prompt_index += 1
-            print(f"🎨 Generating Image for prompt: \"{prompt}\"")
             prompt_job_name = f"{job_name}_p{prompt_index}"
-            run_actiona(
+            if prompt_job_name in completed:
+                continue
+            print(f"🎨 Generating Image for prompt: \"{prompt}\"")
+            success = run_actiona(
                 config["scripts"]["img_gen"],
                 prompt,
                 config,
                 output_dir=target_dir,
                 job_name=prompt_job_name,
             )
+            if success:
+                completed.append(prompt_job_name)
+                try:
+                    with open(progress_path, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {"completed_files": completed, "status": "in_progress"},
+                            f,
+                            indent=4,
+                        )
+                except OSError:
+                    pass
+            if check_yield_command(config):
+                print("🛑 Preemption requested. Yielding job...")
+                img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
+                os.makedirs(img_queue, exist_ok=True)
+                try:
+                    shutil.move(job_path, os.path.join(img_queue, filename))
+                except OSError:
+                    pass
+                return True
         os.makedirs(review_path, exist_ok=True)
         shutil.move(job_path, os.path.join(target_dir, filename))
         print(f"✅ Job finished: {filename}")
@@ -268,7 +329,17 @@ def process_jobs(config):
             for f in sorted(os.listdir(job_path))
             if os.path.splitext(f)[1].lower() in {".png", ".jpg", ".jpeg"}
         ]
+        progress_path = os.path.join(job_path, "progress.json")
+        completed = []
+        try:
+            with open(progress_path, "r", encoding="utf-8") as f:
+                progress_data = json.load(f)
+                completed = progress_data.get("completed_files", [])
+        except (OSError, json.JSONDecodeError):
+            completed = []
         for image_name in images:
+            if image_name in completed:
+                continue
             image_path = os.path.join(job_path, image_name)
             prompt_path = os.path.splitext(image_path)[0] + ".txt"
             try:
@@ -300,7 +371,7 @@ def process_jobs(config):
                 continue
 
             print(f"unknown staging image: {image_name}")
-            run_actiona(
+            success = run_actiona(
                 config["scripts"]["vid_gen"],
                 "",
                 config,
@@ -310,6 +381,26 @@ def process_jobs(config):
                 num_outputs=2,
                 prompt_text=prompt_text,
             )
+            if success:
+                completed.append(image_name)
+                try:
+                    with open(progress_path, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {"completed_files": completed, "status": "in_progress"},
+                            f,
+                            indent=4,
+                        )
+                except OSError:
+                    pass
+            if check_yield_command(config):
+                print("🛑 Preemption requested. Yielding job...")
+                vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
+                os.makedirs(vid_queue, exist_ok=True)
+                try:
+                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                except OSError:
+                    pass
+                return True
 
         archive_path = get_sys_path("04_archive")
         os.makedirs(archive_path, exist_ok=True)
@@ -453,6 +544,7 @@ def run_actiona(
 
 def main():
     print("🚀 RenderFleet Worker started...")
+    dispatcher = FleetDispatcher(CONFIG, get_sys_path)
     observer = Observer()
     inbox = CONFIG["inbox_path"]
     cmds = CONFIG["command_path"]
@@ -475,7 +567,11 @@ def main():
                 send_heartbeat(CONFIG, status="PAUSED")
                 time.sleep(2)
                 continue
-            dispatch_jobs(CONFIG)
+            dispatcher.recover_dead_workers()
+            img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
+            active_floor = get_sys_path("02_active_floor")
+            dispatcher.enforce_vip_preemption(img_queue, active_floor)
+            dispatcher.dispatch_smart()
             did_work = process_jobs(CONFIG)
             if did_work:
                 continue

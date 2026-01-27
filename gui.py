@@ -149,6 +149,7 @@ class RenderFleetApp(ctk.CTk):
         self.title("RenderFleet Commander")
         self.geometry("1000x600")
 
+        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         self.syncthing_root = os.path.expanduser("~/RenderFleet")
 
         self.tabview = ctk.CTkTabview(self)
@@ -157,6 +158,8 @@ class RenderFleetApp(ctk.CTk):
         self.monitor_tab = self.tabview.add("Monitor")
         self.factory_tab = self.tabview.add("Image Factory")
         self.video_tab = self.tabview.add("Video Factory")
+        self.weights_tab = self.tabview.add("Weights")
+        self.analytics_tab = self.tabview.add("Analytics")
 
         header = ctk.CTkFrame(self.monitor_tab, fg_color="#111111")
         header.pack(fill="x", padx=10, pady=10)
@@ -169,9 +172,12 @@ class RenderFleetApp(ctk.CTk):
 
         self._build_image_factory()
         self._build_video_factory()
+        self._build_weights_tab()
+        self._build_analytics_tab()
 
         self.refresh_fleet()
         self.refresh_review_folders()
+        self.refresh_analytics()
 
     def _build_image_factory(self):
         container = ctk.CTkFrame(self.factory_tab, fg_color="#151515")
@@ -307,8 +313,28 @@ class RenderFleetApp(ctk.CTk):
         right_label = ctk.CTkLabel(right, text="Selected Job Config", font=("Helvetica", 14, "bold"))
         right_label.pack(anchor="w", padx=12, pady=(12, 6))
 
-        self.video_prompt_entry = ctk.CTkEntry(right, placeholder_text="e.g. slow pan, 4k")
-        self.video_prompt_entry.pack(fill="x", padx=12, pady=6)
+        self.video_mode_tabs = ctk.CTkTabview(right)
+        self.video_mode_tabs.pack(fill="both", expand=True, padx=12, pady=6)
+
+        global_tab = self.video_mode_tabs.add("Global")
+        manual_tab = self.video_mode_tabs.add("Manual")
+        mapping_tab = self.video_mode_tabs.add("Mapping")
+
+        self.global_prompt_entry = ctk.CTkEntry(global_tab, placeholder_text="e.g. slow pan, 4k")
+        self.global_prompt_entry.pack(fill="x", padx=10, pady=10)
+
+        self.manual_prompts_frame = ctk.CTkScrollableFrame(manual_tab, fg_color="#151515")
+        self.manual_prompts_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.manual_prompt_entries = {}
+
+        self.mapping_data = {}
+        self.mapping_button = ctk.CTkButton(mapping_tab, text="Load Mapping File", command=self._load_mapping_file)
+        self.mapping_button.pack(fill="x", padx=10, pady=(10, 6))
+        self.mapping_status = ctk.CTkLabel(mapping_tab, text="No mapping loaded.")
+        self.mapping_status.pack(anchor="w", padx=10, pady=(0, 6))
+        self.mapping_preview = ctk.CTkTextbox(mapping_tab, height=120)
+        self.mapping_preview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         self.video_stats_label = ctk.CTkLabel(right, text="Stats: 0 Images found")
         self.video_stats_label.pack(anchor="w", padx=12, pady=6)
@@ -326,6 +352,7 @@ class RenderFleetApp(ctk.CTk):
         self.video_feedback_label.pack(anchor="w", padx=12, pady=(0, 12))
 
         self.selected_review_folder = ""
+        self.selected_images = []
         self.review_folders = []
 
     def refresh_review_folders(self):
@@ -347,8 +374,11 @@ class RenderFleetApp(ctk.CTk):
 
         self.review_folders = sorted(folders)
         self.selected_review_folder = ""
+        self.selected_images = []
         self._update_review_list()
         self.video_stats_label.configure(text="Stats: 0 Images found")
+        self._populate_manual_prompts()
+        self._update_mapping_preview()
 
     def _update_review_list(self):
         for widget in self.review_list_frame.winfo_children():
@@ -373,33 +403,116 @@ class RenderFleetApp(ctk.CTk):
             self.syncthing_root, "03_review_room", "_ready", folder_name
         )
         image_count = 0
+        images = []
         if os.path.isdir(self.selected_review_folder):
             for fname in os.listdir(self.selected_review_folder):
                 if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                     image_count += 1
+                    images.append(fname)
+        self.selected_images = sorted(images)
         self.video_stats_label.configure(text=f"Stats: {image_count} Images found")
+        self._populate_manual_prompts()
+        self._update_mapping_preview()
+
+    def _populate_manual_prompts(self):
+        for widget in self.manual_prompts_frame.winfo_children():
+            widget.destroy()
+        self.manual_prompt_entries = {}
+        if not self.selected_images:
+            empty = ctk.CTkLabel(self.manual_prompts_frame, text="Select a folder to load images.")
+            empty.pack(anchor="w", padx=8, pady=8)
+            return
+
+        for fname in self.selected_images:
+            row = ctk.CTkFrame(self.manual_prompts_frame, fg_color="transparent")
+            row.pack(fill="x", padx=6, pady=4)
+            label = ctk.CTkLabel(row, text=fname, width=180, anchor="w")
+            label.pack(side="left")
+            entry = ctk.CTkEntry(row, placeholder_text="Prompt for this image")
+            entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+            self.manual_prompt_entries[fname] = entry
+
+    def _load_mapping_file(self):
+        file_path = ctk.filedialog.askopenfilename(
+            title="Select mapping file",
+            filetypes=[("Text Files", "*.txt")],
+        )
+        if not file_path:
+            return
+        mapping = {}
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+
+        for line in lines:
+            if "=" not in line:
+                continue
+            name, prompt = line.split("=", 1)
+            name = name.strip()
+            prompt = prompt.strip()
+            if name:
+                mapping[name] = prompt
+
+        self.mapping_data = mapping
+        self.mapping_status.configure(text=f"Loaded {len(mapping)} mappings.")
+        self._update_mapping_preview()
+
+    def _update_mapping_preview(self):
+        if not hasattr(self, "mapping_preview"):
+            return
+        self.mapping_preview.delete("1.0", "end")
+        if not self.selected_images:
+            self.mapping_preview.insert("end", "Select a folder to preview mapping matches.\n")
+            return
+        if not self.mapping_data:
+            self.mapping_preview.insert("end", "No mapping loaded.\n")
+            return
+        matches = []
+        for fname in self.selected_images:
+            if fname in self.mapping_data:
+                matches.append(f"{fname} = {self.mapping_data[fname]}")
+        self.mapping_preview.insert(
+            "end",
+            f"Matched {len(matches)} / {len(self.selected_images)} images\\n\\n",
+        )
+        for line in matches[:20]:
+            self.mapping_preview.insert("end", line + "\\n")
 
     def dispatch_video_job(self):
         if not self.selected_review_folder:
             self._show_video_feedback("Select a folder first.", is_error=True)
             return
 
-        prompt = self.video_prompt_entry.get().strip()
-        image_files = []
-        try:
-            for fname in os.listdir(self.selected_review_folder):
-                if fname.lower().endswith((".png", ".jpg", ".jpeg")):
-                    image_files.append(fname)
-        except OSError:
-            self._show_video_feedback("Failed to read folder.", is_error=True)
-            return
+        image_files = self.selected_images[:]
+        if not image_files:
+            try:
+                for fname in os.listdir(self.selected_review_folder):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                        image_files.append(fname)
+            except OSError:
+                self._show_video_feedback("Failed to read folder.", is_error=True)
+                return
+
+        mode = self.video_mode_tabs.get()
+        if mode == "Global":
+            global_prompt = self.global_prompt_entry.get().strip()
+            prompt_map = {fname: global_prompt for fname in image_files}
+        elif mode == "Manual":
+            prompt_map = {}
+            for fname in image_files:
+                entry = self.manual_prompt_entries.get(fname)
+                prompt_map[fname] = entry.get().strip() if entry else ""
+        else:
+            prompt_map = {fname: self.mapping_data.get(fname, "") for fname in image_files}
 
         for fname in image_files:
             base, _ext = os.path.splitext(fname)
             txt_path = os.path.join(self.selected_review_folder, f"{base}.txt")
             try:
                 with open(txt_path, "w", encoding="utf-8") as f:
-                    f.write(prompt)
+                    f.write(prompt_map.get(fname, ""))
             except OSError:
                 self._show_video_feedback("Failed to write prompt files.", is_error=True)
                 return
@@ -419,6 +532,93 @@ class RenderFleetApp(ctk.CTk):
         color = "#d9534f" if is_error else "#2ecc71"
         self.video_feedback_label.configure(text=message, text_color=color)
         self.after(2000, lambda: self.video_feedback_label.configure(text=""))
+
+    def _build_weights_tab(self):
+        container = ctk.CTkFrame(self.weights_tab, fg_color="#151515")
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        header = ctk.CTkLabel(container, text="Dispatch Weights", font=("Helvetica", 20, "bold"))
+        header.pack(anchor="w", padx=12, pady=(12, 6))
+
+        self.weights_frame = ctk.CTkFrame(container, fg_color="#1b1b1b", corner_radius=10)
+        self.weights_frame.pack(fill="both", expand=True, padx=12, pady=10)
+
+        self.weights_entries = {}
+        self._load_weights_config()
+
+        self.save_weights_button = ctk.CTkButton(
+            container, text="Save Weights", height=40, command=self._save_weights
+        )
+        self.save_weights_button.pack(fill="x", padx=12, pady=(0, 6))
+
+        self.weights_feedback = ctk.CTkLabel(container, text="", text_color="#2ecc71")
+        self.weights_feedback.pack(anchor="w", padx=12, pady=(0, 12))
+
+    def _load_weights_config(self):
+        for widget in self.weights_frame.winfo_children():
+            widget.destroy()
+        self.weights_entries = {}
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg = {}
+
+        weights = cfg.get("weights", {}) or {"default": 10}
+        for key, value in weights.items():
+            row = ctk.CTkFrame(self.weights_frame, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=6)
+            label = ctk.CTkLabel(row, text=key, width=120, anchor="w")
+            label.pack(side="left")
+            entry = ctk.CTkEntry(row)
+            entry.insert(0, str(value))
+            entry.pack(side="left", fill="x", expand=True)
+            self.weights_entries[key] = entry
+
+    def _save_weights(self):
+        weights = {}
+        for key, entry in self.weights_entries.items():
+            try:
+                weights[key] = int(entry.get().strip())
+            except ValueError:
+                continue
+
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg = {}
+        cfg["weights"] = weights
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=4)
+            self._show_weights_feedback("Weights saved.")
+        except OSError:
+            self._show_weights_feedback("Failed to save weights.", is_error=True)
+
+    def _show_weights_feedback(self, message, is_error=False):
+        color = "#d9534f" if is_error else "#2ecc71"
+        self.weights_feedback.configure(text=message, text_color=color)
+        self.after(2000, lambda: self.weights_feedback.configure(text=""))
+
+    def _build_analytics_tab(self):
+        container = ctk.CTkFrame(self.analytics_tab, fg_color="#151515")
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        header = ctk.CTkLabel(container, text="Analytics", font=("Helvetica", 20, "bold"))
+        header.pack(anchor="w", padx=12, pady=(12, 6))
+
+        stats = ctk.CTkFrame(container, fg_color="#1b1b1b", corner_radius=10)
+        stats.pack(fill="both", expand=True, padx=12, pady=10)
+
+        self.queue_label = ctk.CTkLabel(stats, text="Jobs in Queue (Img/Vid): 0 / 0")
+        self.queue_label.pack(anchor="w", padx=12, pady=(12, 6))
+
+        self.active_workers_label = ctk.CTkLabel(stats, text="Active Workers: 0")
+        self.active_workers_label.pack(anchor="w", padx=12, pady=6)
+
+        self.eta_label = ctk.CTkLabel(stats, text="Est. Throughput: N/A")
+        self.eta_label.pack(anchor="w", padx=12, pady=(6, 12))
 
     def refresh_fleet(self):
         heartbeat_dir = os.path.join(self.syncthing_root, "_system", "heartbeats")
@@ -452,6 +652,45 @@ class RenderFleetApp(ctk.CTk):
                     continue
 
         self.after(2000, self.refresh_fleet)
+
+    def refresh_analytics(self):
+        img_queue = os.path.join(self.syncthing_root, "01_job_factory", "img_queue")
+        vid_queue = os.path.join(self.syncthing_root, "01_job_factory", "vid_queue")
+        try:
+            img_jobs = [f for f in os.listdir(img_queue) if not f.startswith(".")]
+        except OSError:
+            img_jobs = []
+        try:
+            vid_jobs = [f for f in os.listdir(vid_queue) if not f.startswith(".")]
+        except OSError:
+            vid_jobs = []
+
+        heartbeat_dir = os.path.join(self.syncthing_root, "_system", "heartbeats")
+        heartbeat_files = glob.glob(os.path.join(heartbeat_dir, "*.json"))
+        current_time = time.time()
+        active_workers = 0
+        for hb_path in heartbeat_files:
+            try:
+                with open(hb_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                ts = data.get("timestamp", 0)
+                if current_time - ts <= 90:
+                    active_workers += 1
+            except (OSError, json.JSONDecodeError):
+                continue
+
+        self.queue_label.configure(text=f"Jobs in Queue (Img/Vid): {len(img_jobs)} / {len(vid_jobs)}")
+        self.active_workers_label.configure(text=f"Active Workers: {active_workers}")
+
+        total_jobs = len(img_jobs) + len(vid_jobs)
+        if active_workers <= 0:
+            eta_text = "Est. Throughput: N/A"
+        else:
+            eta_seconds = int((total_jobs * 30) / max(active_workers, 1))
+            eta_text = f"Est. Throughput: ~{eta_seconds}s ETA"
+        self.eta_label.configure(text=eta_text)
+
+        self.after(5000, self.refresh_analytics)
 
 
 if __name__ == "__main__":
