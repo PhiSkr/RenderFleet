@@ -99,11 +99,14 @@ class FleetDispatcher:
             if not worker_id or not isinstance(ts, int):
                 continue
 
-            if now - ts < 30 and status == "IDLE":
+            if now - ts < 90 and status == "IDLE":
                 if allowed_roles is not None and role not in allowed_roles:
                     continue
                 idle_workers.append(worker_id)
 
+        self.logger(
+            f"DEBUG: Active idle workers within 90s window: {len(idle_workers)}"
+        )
         return idle_workers
 
     def get_next_job(self, queue_path, config_weights):

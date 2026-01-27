@@ -14,6 +14,7 @@ from dispatcher import FleetDispatcher
 def load_config():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(base_dir, "config.json")
+    local_config_path = os.path.join(base_dir, "local_config.json")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -21,10 +22,34 @@ def load_config():
     except (OSError, json.JSONDecodeError) as e:
         print(f"❌ ERROR loading config at {config_path}: {e}")
         raise
+    local_source = "global"
+    if not os.path.exists(local_config_path):
+        local_data = {
+            "worker_id": data.get("worker_id"),
+            "initial_role": data.get("initial_role"),
+        }
+        try:
+            with open(local_config_path, "w", encoding="utf-8") as f:
+                json.dump(local_data, f, indent=4)
+        except OSError:
+            pass
+    else:
+        try:
+            with open(local_config_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+            data["worker_id"] = local_data.get("worker_id", data.get("worker_id"))
+            data["initial_role"] = local_data.get("initial_role", data.get("initial_role"))
+            local_source = "local"
+        except (OSError, json.JSONDecodeError):
+            local_source = "global"
     if "paused" not in data:
         data["paused"] = False
     if "weights" not in data:
         data["weights"] = {"default": 10}
+    print(
+        f"DEBUG: Using worker_id={data.get('worker_id')} "
+        f"role={data.get('initial_role')} (source={local_source})"
+    )
     return data
 
 
@@ -115,14 +140,18 @@ def process_command_file(file_path, config):
         new_role = data.get("role") or data.get("value")
     if new_role:
         config["initial_role"] = new_role
+        local_config_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+        )
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(local_config_path, "r", encoding="utf-8") as f:
                 cfg_on_disk = json.load(f)
         except (OSError, json.JSONDecodeError):
             cfg_on_disk = {}
+        cfg_on_disk["worker_id"] = config.get("worker_id")
         cfg_on_disk["initial_role"] = new_role
         try:
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            with open(local_config_path, "w", encoding="utf-8") as f:
                 json.dump(cfg_on_disk, f, indent=4)
         except OSError:
             pass
@@ -559,6 +588,7 @@ def main():
     startup_cmd = os.path.join(cmds, f"{CONFIG.get('worker_id')}.cmd")
     if os.path.exists(startup_cmd):
         process_command_file(startup_cmd, CONFIG)
+    send_heartbeat(CONFIG, status="STARTING")
     observer.start()
     try:
         while True:
