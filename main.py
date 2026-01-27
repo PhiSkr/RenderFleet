@@ -41,6 +41,53 @@ def send_heartbeat(config, status="IDLE", current_job=None):
     print(f"♥ Heartbeat sent: {status}")
 
 
+def check_commands(config):
+    worker_id = config.get("worker_id")
+    if not worker_id:
+        return False
+
+    cmd_path = get_sys_path(os.path.join("_system", "commands", f"{worker_id}.cmd"))
+    if not os.path.exists(cmd_path):
+        return False
+
+    try:
+        with open(cmd_path, "r", encoding="utf-8") as f:
+            cmd_data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    try:
+        action = cmd_data.get("action")
+        if action == "set_role":
+            new_role = cmd_data.get("value", "")
+            if new_role:
+                config["initial_role"] = new_role
+                try:
+                    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                        cfg_on_disk = json.load(f)
+                except (OSError, json.JSONDecodeError):
+                    cfg_on_disk = {}
+                cfg_on_disk["initial_role"] = new_role
+                try:
+                    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                        json.dump(cfg_on_disk, f, indent=4)
+                except OSError:
+                    pass
+                print(f"⚙️ ROLE CHANGED to {new_role}")
+        elif action == "stop":
+            print("🛑 Remote Stop received.")
+            sys.exit(0)
+        else:
+            return False
+    finally:
+        try:
+            os.remove(cmd_path)
+        except OSError:
+            pass
+
+    return True
+
+
 def process_jobs(config):
     inbox_rel = os.path.join("02_active_floor", config.get("worker_id", ""), "inbox")
     review_rel = "03_review_room"
@@ -287,6 +334,7 @@ def main():
     print("🚀 RenderFleet Worker started...")
     try:
         while True:
+            check_commands(CONFIG)
             dispatch_jobs(CONFIG)
             did_work = process_jobs(CONFIG)
             if did_work:
