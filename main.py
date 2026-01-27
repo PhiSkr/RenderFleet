@@ -37,8 +37,7 @@ def load_config():
         try:
             with open(local_config_path, "r", encoding="utf-8") as f:
                 local_data = json.load(f)
-            data["worker_id"] = local_data.get("worker_id", data.get("worker_id"))
-            data["initial_role"] = local_data.get("initial_role", data.get("initial_role"))
+            data.update(local_data)
             local_source = "local"
         except (OSError, json.JSONDecodeError):
             local_source = "global"
@@ -61,15 +60,18 @@ print(f"DEBUG: Heartbeat Path value: '{CONFIG.get('heartbeat_path')}'")
 
 
 def get_sys_path(subpath):
-    root = os.path.expanduser(CONFIG.get("syncthing_root", ""))
-    if root:
-        if os.path.isabs(root):
-            root = os.path.abspath(root)
-        else:
-            root = os.path.abspath(root)
+    root = CONFIG.get("syncthing_root")
+    if not root:
+        root = os.path.expanduser("~/RenderFleet")
+        print("⚠️ WARNING: syncthing_root missing in config, using default ~/RenderFleet")
+    root = os.path.abspath(os.path.expanduser(root))
     if os.path.isabs(subpath):
-        return os.path.abspath(os.path.expanduser(subpath))
-    return os.path.join(root, subpath)
+        full_path = os.path.abspath(os.path.expanduser(subpath))
+    else:
+        full_path = os.path.abspath(os.path.join(root, subpath))
+    if not os.path.exists(full_path):
+        print(f"DEBUG: Path resolution: '{subpath}' -> '{full_path}'")
+    return full_path
 
 
 def send_heartbeat(config, status="IDLE", current_job=None):
