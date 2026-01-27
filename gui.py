@@ -45,7 +45,75 @@ class WorkerCard(ctk.CTkFrame):
         job_label.pack(anchor="w", padx=12)
 
         last_seen_label = ctk.CTkLabel(self, text=f"Last Seen: {last_seen}")
-        last_seen_label.pack(anchor="w", padx=12, pady=(0, 10))
+        last_seen_label.pack(anchor="w", padx=12, pady=(0, 6))
+
+        button_row = ctk.CTkFrame(self, fg_color="transparent")
+        button_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        btn_state = "normal" if is_online and time_diff <= 90 else "disabled"
+
+        img_btn = ctk.CTkButton(
+            button_row,
+            text="Set: ImgLead",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "img_lead"),
+            state=btn_state,
+        )
+        img_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
+
+        vid_btn = ctk.CTkButton(
+            button_row,
+            text="Set: VidLead",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "vid_lead"),
+            state=btn_state,
+        )
+        vid_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+        img_worker_btn = ctk.CTkButton(
+            button_row,
+            text="Set: ImgWork",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "img_worker"),
+            state=btn_state,
+        )
+        img_worker_btn.grid(row=1, column=0, padx=4, pady=4, sticky="w")
+
+        vid_worker_btn = ctk.CTkButton(
+            button_row,
+            text="Set: VidWork",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "vid_worker"),
+            state=btn_state,
+        )
+        vid_worker_btn.grid(row=1, column=1, padx=4, pady=4, sticky="w")
+
+        self.feedback_label = ctk.CTkLabel(self, text="", text_color="#2ecc71")
+        self.feedback_label.pack(anchor="w", padx=12, pady=(0, 10))
+
+    def send_command(self, worker_id, role_value):
+        if not worker_id:
+            return
+        cmd = {"action": "set_role", "value": role_value}
+        cmd_path = os.path.expanduser(
+            os.path.join("~", "RenderFleet", "_system", "commands", f"{worker_id}.cmd")
+        )
+        os.makedirs(os.path.dirname(cmd_path), exist_ok=True)
+        try:
+            with open(cmd_path, "w", encoding="utf-8") as f:
+                json.dump(cmd, f)
+            self._show_feedback("Sent!")
+        except OSError:
+            self._show_feedback("Failed", is_error=True)
+
+    def _show_feedback(self, message, is_error=False):
+        color = "#d9534f" if is_error else "#2ecc71"
+        self.feedback_label.configure(text=message, text_color=color)
+        self.after(1500, lambda: self.feedback_label.configure(text=""))
 
 
 class RenderFleetApp(ctk.CTk):

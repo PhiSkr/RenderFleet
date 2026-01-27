@@ -215,11 +215,16 @@ def process_jobs(config):
     return True
 
 
-def get_idle_workers(config):
+def get_idle_workers(config, target_type=None):
     hb_dir = get_sys_path(os.path.join("_system", "heartbeats"))
     hb_files = glob.glob(os.path.join(hb_dir, "*.json"))
     now = int(time.time())
     idle_workers = []
+    allowed_roles = None
+    if target_type == "img":
+        allowed_roles = {"img_worker", "img_lead"}
+    elif target_type == "vid":
+        allowed_roles = {"vid_worker", "vid_lead"}
 
     for hb_path in hb_files:
         try:
@@ -233,11 +238,14 @@ def get_idle_workers(config):
 
         ts = data.get("timestamp")
         status = data.get("status")
+        role = data.get("role")
         worker_id = data.get("worker_id")
         if not worker_id or not isinstance(ts, int):
             continue
 
         if now - ts < 30 and status == "IDLE":
+            if allowed_roles is not None and role not in allowed_roles:
+                continue
             idle_workers.append(worker_id)
 
     return idle_workers
@@ -254,7 +262,10 @@ def dispatch_jobs(config):
 
     source_path = get_sys_path(source_rel)
     job_files = glob.glob(os.path.join(source_path, "*"))
-    idle_workers = get_idle_workers(config)
+    if role == "img_lead":
+        idle_workers = get_idle_workers(config, target_type="img")
+    else:
+        idle_workers = get_idle_workers(config, target_type="vid")
     if not job_files or not idle_workers:
         return
 
