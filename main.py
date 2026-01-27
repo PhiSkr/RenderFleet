@@ -48,6 +48,17 @@ def load_config():
     if "weights" not in config:
         config["weights"] = {"default": 10}
 
+    root = config.get("syncthing_root") or "~/RenderFleet"
+    root = os.path.abspath(os.path.expanduser(root))
+    if "inbox_path" not in config:
+        config["inbox_path"] = os.path.join(root, "01_job_factory")
+    if "command_path" not in config:
+        config["command_path"] = os.path.join(root, "_system", "commands")
+    if "heartbeat_path" not in config:
+        config["heartbeat_path"] = os.path.join(root, "_system", "heartbeats")
+    for key in ("inbox_path", "command_path", "heartbeat_path"):
+        config[key] = os.path.abspath(os.path.expanduser(config[key]))
+
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
 
@@ -594,6 +605,12 @@ def main():
     observer.schedule(RenderFleetHandler(), cmds, recursive=False)
     print(f"DEBUG: 👀 Watching INBOX at: '{inbox}'")
     print(f"DEBUG: 👀 Watching COMMANDS at: '{cmds}'")
+    print(
+        "DEBUG: Paths -> "
+        f"inbox_path='{CONFIG.get('inbox_path')}', "
+        f"command_path='{CONFIG.get('command_path')}', "
+        f"heartbeat_path='{CONFIG.get('heartbeat_path')}'"
+    )
     startup_cmd = os.path.join(cmds, f"{CONFIG.get('worker_id')}.cmd")
     if os.path.exists(startup_cmd):
         process_command_file(startup_cmd, CONFIG)
