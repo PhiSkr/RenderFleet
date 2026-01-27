@@ -12,8 +12,7 @@ class FleetDispatcher:
         self.get_sys_path = get_sys_path
         self.logger = logger
         self.deficits = {}
-        self.key_order = []
-        self.last_index = -1
+        self.current_index = {}
 
     def _load_weights(self):
         root = self.config.get("syncthing_root") or "~/RenderFleet"
@@ -182,34 +181,43 @@ class FleetDispatcher:
                 )
                 buckets.setdefault("default", []).append(job)
 
-        self.key_order = [k for k in keys] + ["default"]
-        if not self.key_order:
-            self.key_order = ["default"]
+        key_order = [k for k in keys] + ["default"]
+        if not key_order:
+            key_order = ["default"]
 
-        for key in self.key_order:
-            self.deficits.setdefault(key, 0)
+        queue_key = os.path.abspath(queue_path)
+        if queue_key not in self.deficits:
+            self.deficits[queue_key] = {}
+        if queue_key not in self.current_index:
+            self.current_index[queue_key] = 0
 
-        checked = 0
-        total_keys = len(self.key_order)
-        while checked < total_keys:
-            self.last_index = (self.last_index + 1) % total_keys
-            key = self.key_order[self.last_index]
-            quantum = int(weights_cfg.get(key, default_weight))
-            self.deficits[key] += max(0, quantum)
-            if buckets.get(key) and self.deficits[key] >= 1:
-                job = buckets[key].pop(0)
-                self.deficits[key] -= 1
+        for key in key_order:
+            self.deficits[queue_key].setdefault(key, 0)
+
+        total_keys = len(key_order)
+        attempts = 0
+        while attempts < total_keys:
+            idx = self.current_index[queue_key] % total_keys
+            category = key_order[idx]
+            if self.deficits[queue_key][category] == 0:
+                self.deficits[queue_key][category] += max(
+                    0, int(weights_cfg.get(category, default_weight))
+                )
+
+            self.logger(
+                f"DEBUG: DRR State - Bucket: {category}, "
+                f"Credit: {self.deficits[queue_key][category]}, "
+                f"Total Jobs in Queue: {len(jobs)}"
+            )
+
+            if buckets.get(category) and self.deficits[queue_key][category] >= 1:
+                job = buckets[category].pop(0)
+                self.deficits[queue_key][category] -= 1
                 self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
                 return job
-            checked += 1
 
-        for key in self.key_order:
-            self.deficits[key] += int(weights_cfg.get(key, default_weight))
-            if buckets.get(key) and self.deficits[key] >= 1:
-                job = buckets[key].pop(0)
-                self.deficits[key] -= 1
-                self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
-                return job
+            self.current_index[queue_key] = (idx + 1) % total_keys
+            attempts += 1
 
         return None
 
