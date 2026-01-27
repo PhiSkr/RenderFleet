@@ -162,18 +162,25 @@ class FleetDispatcher:
 
         for job in jobs:
             name = os.path.basename(job)
-            matched_key = "default"
-            matched_weight = default_weight
+            lower_name = name.lower()
+            matched_key = None
+            matched_weight = None
             for key in keys:
-                if re.search(rf"\\b{re.escape(key)}\\b", name, re.IGNORECASE):
+                if key.lower() in lower_name:
                     weight = int(weights_cfg.get(key, default_weight))
-                    if weight > matched_weight:
+                    if matched_weight is None or weight > matched_weight:
                         matched_key = key
                         matched_weight = weight
-            self.logger(
-                f"DEBUG: Matching {name} -> Category: {matched_key} (Weight: {matched_weight})"
-            )
-            buckets.setdefault(matched_key, []).append(job)
+            if matched_key:
+                self.logger(
+                    f"DEBUG: 🎯 Match! {name} contains '{matched_key}' -> Weight: {matched_weight}"
+                )
+                buckets.setdefault(matched_key, []).append(job)
+            else:
+                self.logger(
+                    f\"DEBUG: ℹ️ No keyword found in {name}, falling back to 'default' ({default_weight})\"
+                )
+                buckets.setdefault("default", []).append(job)
 
         self.key_order = [k for k in keys] + ["default"]
         if not self.key_order:
