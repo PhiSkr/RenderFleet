@@ -213,10 +213,10 @@ class FleetDispatcher:
             if buckets.get(category) and self.deficits[queue_key][category] >= 1:
                 job = buckets[category].pop(0)
                 self.deficits[queue_key][category] -= 1
-                self.current_index[queue_key] = (idx + 1) % total_keys
                 self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
                 return job
 
+            self.deficits[queue_key][category] = 0
             self.current_index[queue_key] = (idx + 1) % total_keys
             attempts += 1
 
