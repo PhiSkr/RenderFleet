@@ -126,6 +126,12 @@ class FleetDispatcher:
             self.logger("DEBUG: Queue empty (0 valid jobs found).")
             return None
 
+        for job in jobs:
+            name = os.path.basename(job).lower()
+            if "vip" in name or "urgent" in name:
+                self.logger(f"DEBUG: Selected VIP job: {os.path.basename(job)}")
+                return job
+
         weights_cfg = config_weights or {}
         default_weight = weights_cfg.get("default", 1)
         keys = [k for k in weights_cfg.keys() if k != "default"]

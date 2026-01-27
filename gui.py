@@ -540,6 +540,15 @@ class RenderFleetApp(ctk.CTk):
         header = ctk.CTkLabel(container, text="Dispatch Weights", font=("Helvetica", 20, "bold"))
         header.pack(anchor="w", padx=12, pady=(12, 6))
 
+        add_row = ctk.CTkFrame(container, fg_color="transparent")
+        add_row.pack(fill="x", padx=12, pady=(0, 6))
+        self.new_weight_name = ctk.CTkEntry(add_row, placeholder_text="weight name")
+        self.new_weight_name.pack(side="left", padx=(0, 6))
+        self.new_weight_value = ctk.CTkEntry(add_row, placeholder_text="value")
+        self.new_weight_value.pack(side="left", padx=(0, 6))
+        add_btn = ctk.CTkButton(add_row, text="+", width=36, command=self._add_weight_row)
+        add_btn.pack(side="left")
+
         self.weights_frame = ctk.CTkFrame(container, fg_color="#1b1b1b", corner_radius=10)
         self.weights_frame.pack(fill="both", expand=True, padx=12, pady=10)
 
@@ -566,18 +575,41 @@ class RenderFleetApp(ctk.CTk):
 
         weights = cfg.get("weights", {}) or {"default": 10}
         for key, value in weights.items():
-            row = ctk.CTkFrame(self.weights_frame, fg_color="transparent")
-            row.pack(fill="x", padx=12, pady=6)
-            label = ctk.CTkLabel(row, text=key, width=120, anchor="w")
-            label.pack(side="left")
-            entry = ctk.CTkEntry(row)
-            entry.insert(0, str(value))
-            entry.pack(side="left", fill="x", expand=True)
-            self.weights_entries[key] = entry
+            self._add_weight_row(name=key, value=str(value))
+
+    def _add_weight_row(self, name=None, value=None):
+        from_input = False
+        if name is None:
+            from_input = True
+            name = self.new_weight_name.get().strip()
+            value = self.new_weight_value.get().strip()
+        if not name:
+            return
+        row = ctk.CTkFrame(self.weights_frame, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=6)
+        label = ctk.CTkLabel(row, text=name, width=120, anchor="w")
+        label.pack(side="left")
+        entry = ctk.CTkEntry(row)
+        entry.insert(0, value if value is not None else "")
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        del_btn = ctk.CTkButton(row, text="X", width=36, command=lambda n=name: self._delete_weight_row(n))
+        del_btn.pack(side="left")
+        self.weights_entries[name] = (entry, row)
+        if from_input:
+            self.new_weight_name.delete(0, "end")
+            self.new_weight_value.delete(0, "end")
+
+    def _delete_weight_row(self, name):
+        entry, row = self.weights_entries.get(name, (None, None))
+        if row is not None:
+            row.destroy()
+        if name in self.weights_entries:
+            del self.weights_entries[name]
 
     def _save_weights(self):
         weights = {}
-        for key, entry in self.weights_entries.items():
+        for key, entry_row in self.weights_entries.items():
+            entry = entry_row[0]
             try:
                 weights[key] = int(entry.get().strip())
             except ValueError:
