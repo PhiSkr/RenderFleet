@@ -17,16 +17,19 @@ def load_config():
     local_config_path = os.path.join(base_dir, "local_config.json")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            config = json.load(f)
         print(f"✅ Config loaded from {config_path}")
     except (OSError, json.JSONDecodeError) as e:
         print(f"❌ ERROR loading config at {config_path}: {e}")
         raise
-    local_source = "global"
+
+    if "scripts" not in config or "syncthing_root" not in config:
+        print("⚠️ WARNING: config.json missing critical keys (scripts/syncthing_root).")
+
     if not os.path.exists(local_config_path):
         local_data = {
-            "worker_id": data.get("worker_id"),
-            "initial_role": data.get("initial_role"),
+            "worker_id": config.get("worker_id"),
+            "initial_role": config.get("initial_role"),
         }
         try:
             with open(local_config_path, "w", encoding="utf-8") as f:
@@ -37,19 +40,22 @@ def load_config():
         try:
             with open(local_config_path, "r", encoding="utf-8") as f:
                 local_data = json.load(f)
-            data.update(local_data)
-            local_source = "local"
         except (OSError, json.JSONDecodeError):
-            local_source = "global"
-    if "paused" not in data:
-        data["paused"] = False
-    if "weights" not in data:
-        data["weights"] = {"default": 10}
+            local_data = {}
+
+    config.update(local_data)
+
+    if "paused" not in config:
+        config["paused"] = False
+    if "weights" not in config:
+        config["weights"] = {"default": 10}
+
+    print(f"DEBUG: Config merged. Keys: {list(config.keys())}")
     print(
-        f"DEBUG: Using worker_id={data.get('worker_id')} "
-        f"role={data.get('initial_role')} (source={local_source})"
+        f"DEBUG: Using worker_id={config.get('worker_id')} "
+        f"role={config.get('initial_role')}"
     )
-    return data
+    return config
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
