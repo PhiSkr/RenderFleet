@@ -1,7 +1,7 @@
 {
-    "worker_id": "worker001",
+    "worker_id": "worker_placeholder",
+    "initial_role": "observer",
     "syncthing_root": "~/RenderFleet",
-    "initial_role": "img_lead",
     "landing_zone": "~/RenderFleet/_system/landing_zone",
     "staging_area": "~/RenderFleet/_system/staging_area",
     "staging_prompts": "~/RenderFleet/_system/staging_prompts",
@@ -13,6 +13,6 @@
     "weights": {
         "default": 10,
         "vip": 100,
-        "background": 200
+        "background": 1
     }
 }
