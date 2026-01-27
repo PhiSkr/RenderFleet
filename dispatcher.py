@@ -195,32 +195,45 @@ class FleetDispatcher:
             self.deficits[queue_key].setdefault(key, 0)
 
         total_keys = len(key_order)
-        attempts = 0
-        while attempts < total_keys:
-            idx = self.current_index[queue_key] % total_keys
-            category = key_order[idx]
-            if self.deficits[queue_key][category] == 0:
-                self.deficits[queue_key][category] += max(
-                    0, int(weights_cfg.get(category, default_weight))
+
+        def _try_select_job():
+            attempts = 0
+            while attempts < total_keys:
+                idx = self.current_index[queue_key] % total_keys
+                category = key_order[idx]
+
+                self.logger(
+                    f"DEBUG: DRR State - Bucket: {category}, "
+                    f"Credit: {self.deficits[queue_key][category]}, "
+                    f"Total Jobs in Queue: {len(jobs)}"
                 )
 
-            self.logger(
-                f"DEBUG: DRR State - Bucket: {category}, "
-                f"Credit: {self.deficits[queue_key][category]}, "
-                f"Total Jobs in Queue: {len(jobs)}"
+                if buckets.get(category) and self.deficits[queue_key][category] > 0:
+                    job = buckets[category].pop(0)
+                    self.deficits[queue_key][category] -= 1
+                    if (
+                        self.deficits[queue_key][category] == 0
+                        or not buckets.get(category)
+                    ):
+                        self.current_index[queue_key] = (idx + 1) % total_keys
+                    self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
+                    return job
+
+                self.current_index[queue_key] = (idx + 1) % total_keys
+                attempts += 1
+
+            return None
+
+        job = _try_select_job()
+        if job is not None:
+            return job
+
+        for key in key_order:
+            self.deficits[queue_key][key] = max(
+                0, int(weights_cfg.get(key, default_weight))
             )
 
-            if buckets.get(category) and self.deficits[queue_key][category] >= 1:
-                job = buckets[category].pop(0)
-                self.deficits[queue_key][category] -= 1
-                self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
-                return job
-
-            self.deficits[queue_key][category] = 0
-            self.current_index[queue_key] = (idx + 1) % total_keys
-            attempts += 1
-
-        return None
+        return _try_select_job()
 
     def enforce_vip_preemption(self, queue_path, active_floor_path):
         try:
