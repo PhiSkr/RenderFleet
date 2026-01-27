@@ -189,6 +189,16 @@ class RenderFleetApp(ctk.CTk):
         form = ctk.CTkFrame(container, fg_color="#1b1b1b", corner_radius=10)
         form.pack(fill="x", padx=12, pady=10)
 
+        weights_row = ctk.CTkFrame(form, fg_color="transparent")
+        weights_row.pack(fill="x", padx=12, pady=(12, 6))
+        weight_label = ctk.CTkLabel(weights_row, text="Weight Key")
+        weight_label.pack(side="left", padx=(0, 6))
+        self.img_weight_menu = ctk.CTkOptionMenu(
+            weights_row, values=self._get_weight_keys()
+        )
+        self.img_weight_menu.set("default")
+        self.img_weight_menu.pack(side="left")
+
         self.job_name_entry = ctk.CTkEntry(form, placeholder_text="JobName (e.g. project_alpha)")
         self.job_name_entry.pack(fill="x", padx=12, pady=(12, 6))
 
@@ -262,7 +272,11 @@ class RenderFleetApp(ctk.CTk):
             self._show_feedback("Prompts are required.", is_error=True)
             return
 
-        filename = f"{job_name}_{job_id}.txt" if job_id else f"{job_name}.txt"
+        weight_key = self.img_weight_menu.get() if hasattr(self, "img_weight_menu") else "default"
+        base_name = f"{job_name}_{job_id}" if job_id else job_name
+        if weight_key:
+            base_name = f"{weight_key}_{base_name}"
+        filename = f"{base_name}.txt"
         target_dir = os.path.join(self.syncthing_root, "01_job_factory", "img_queue")
         os.makedirs(target_dir, exist_ok=True)
         target_path = os.path.join(target_dir, filename)
@@ -312,6 +326,16 @@ class RenderFleetApp(ctk.CTk):
 
         right_label = ctk.CTkLabel(right, text="Selected Job Config", font=("Helvetica", 14, "bold"))
         right_label.pack(anchor="w", padx=12, pady=(12, 6))
+
+        weights_row = ctk.CTkFrame(right, fg_color="transparent")
+        weights_row.pack(fill="x", padx=12, pady=(0, 6))
+        weight_label = ctk.CTkLabel(weights_row, text="Weight Key")
+        weight_label.pack(side="left", padx=(0, 6))
+        self.vid_weight_menu = ctk.CTkOptionMenu(
+            weights_row, values=self._get_weight_keys()
+        )
+        self.vid_weight_menu.set("default")
+        self.vid_weight_menu.pack(side="left")
 
         self.video_mode_tabs = ctk.CTkTabview(right)
         self.video_mode_tabs.pack(fill="both", expand=True, padx=12, pady=6)
@@ -517,10 +541,14 @@ class RenderFleetApp(ctk.CTk):
                 self._show_video_feedback("Failed to write prompt files.", is_error=True)
                 return
 
+        weight_key = self.vid_weight_menu.get() if hasattr(self, "vid_weight_menu") else "default"
+        folder_name = os.path.basename(self.selected_review_folder)
+        if weight_key:
+            folder_name = f"{weight_key}_{folder_name}"
         target_dir = os.path.join(self.syncthing_root, "01_job_factory", "vid_queue")
         os.makedirs(target_dir, exist_ok=True)
         try:
-            shutil.move(self.selected_review_folder, target_dir)
+            shutil.move(self.selected_review_folder, os.path.join(target_dir, folder_name))
         except OSError:
             self._show_video_feedback("Failed to move folder.", is_error=True)
             return
@@ -655,6 +683,9 @@ class RenderFleetApp(ctk.CTk):
         self.eta_label = ctk.CTkLabel(stats, text="Est. Throughput: N/A")
         self.eta_label.pack(anchor="w", padx=12, pady=(6, 12))
 
+        self.throughput_24h_label = ctk.CTkLabel(stats, text="Est. 24h Throughput: N/A")
+        self.throughput_24h_label.pack(anchor="w", padx=12, pady=(0, 12))
+
     def refresh_fleet(self):
         heartbeat_dir = os.path.join(self.syncthing_root, "_system", "heartbeats")
         heartbeat_files = glob.glob(os.path.join(heartbeat_dir, "*.json"))
@@ -725,7 +756,27 @@ class RenderFleetApp(ctk.CTk):
             eta_text = f"Est. Throughput: ~{eta_seconds}s ETA"
         self.eta_label.configure(text=eta_text)
 
+        if active_workers <= 0:
+            throughput_text = "Est. 24h Throughput: N/A"
+        else:
+            throughput = int((active_workers * 86400) / 30)
+            throughput_text = f"Est. 24h Throughput: {throughput} Videos"
+        self.throughput_24h_label.configure(text=throughput_text)
+
         self.after(5000, self.refresh_analytics)
+
+    def _get_weight_keys(self):
+        settings_path = os.path.join(self.syncthing_root, "_system", "settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            weights = data.get("weights", {})
+            keys = [k for k in weights.keys() if isinstance(k, str)]
+        except (OSError, json.JSONDecodeError, AttributeError):
+            keys = []
+        if "default" not in keys:
+            keys.insert(0, "default")
+        return keys or ["default"]
 
 
 if __name__ == "__main__":
