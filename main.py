@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import sys
 import time
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 
 def load_config():
@@ -63,6 +65,13 @@ def send_heartbeat(config, status="IDLE", current_job=None):
         json.dump(heartbeat, f, indent=4)
 
     print(f"♥ Heartbeat sent: {status}")
+
+
+class RenderFleetHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        print(f"⚡ EVENT DETECTED: {event.src_path}")
 
 
 def check_commands(config):
@@ -392,6 +401,18 @@ def run_actiona(
 
 def main():
     print("🚀 RenderFleet Worker started...")
+    observer = Observer()
+    inbox = CONFIG["inbox_path"]
+    cmds = CONFIG["command_path"]
+    inbox = os.path.abspath(os.path.expanduser(inbox))
+    cmds = os.path.abspath(os.path.expanduser(cmds))
+    os.makedirs(inbox, exist_ok=True)
+    os.makedirs(cmds, exist_ok=True)
+    observer.schedule(RenderFleetHandler(), inbox, recursive=False)
+    observer.schedule(RenderFleetHandler(), cmds, recursive=False)
+    print(f"DEBUG: 👀 Watching INBOX at: '{inbox}'")
+    print(f"DEBUG: 👀 Watching COMMANDS at: '{cmds}'")
+    observer.start()
     try:
         while True:
             check_commands(CONFIG)
@@ -407,6 +428,8 @@ def main():
             time.sleep(5)
     except KeyboardInterrupt:
         print("\n🛑 Worker stopping...")
+        observer.stop()
+        observer.join()
         send_heartbeat(CONFIG, status="OFFLINE")
         sys.exit(0)
 
