@@ -26,10 +26,19 @@ def load_config():
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 CONFIG = load_config()
+print(f"DEBUG: Config in Memory: {CONFIG}")
+print(f"DEBUG: Heartbeat Path value: '{CONFIG.get('heartbeat_path')}'")
 
 
 def get_sys_path(subpath):
     root = os.path.expanduser(CONFIG.get("syncthing_root", ""))
+    if root:
+        if os.path.isabs(root):
+            root = os.path.abspath(root)
+        else:
+            root = os.path.abspath(root)
+    if os.path.isabs(subpath):
+        return os.path.abspath(os.path.expanduser(subpath))
     return os.path.join(root, subpath)
 
 
@@ -43,6 +52,7 @@ def send_heartbeat(config, status="IDLE", current_job=None):
     }
 
     hb_path = get_sys_path(os.path.join("_system", "heartbeats", f"{heartbeat['worker_id']}.json"))
+    print(f"DEBUG: Writing Heartbeat to: '{hb_path}'")
     hb_dir = os.path.dirname(hb_path)
     os.makedirs(hb_dir, exist_ok=True)
 
