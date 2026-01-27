@@ -63,6 +63,27 @@ def load_config():
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
 
+    settings_path = os.path.join(root, "_system", "settings.json")
+    try:
+        if os.path.exists(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+            if isinstance(settings, dict):
+                if "weights" in settings:
+                    config["weights"] = settings["weights"]
+                if "paused" in settings:
+                    config["paused"] = settings["paused"]
+        else:
+            os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"weights": config.get("weights", {"default": 10}), "paused": config.get("paused", False)},
+                    f,
+                    indent=4,
+                )
+    except (OSError, json.JSONDecodeError):
+        pass
+
     print(f"DEBUG: Config merged. Keys: {list(config.keys())}")
     print(
         f"DEBUG: Using worker_id={config.get('worker_id')} "
@@ -142,9 +163,29 @@ def check_yield_command(config):
     return True
 
 
+def load_fleet_settings(config):
+    root = config.get("syncthing_root") or "~/RenderFleet"
+    root = os.path.abspath(os.path.expanduser(root))
+    settings_path = os.path.join(root, "_system", "settings.json")
+    if not os.path.exists(settings_path):
+        return
+    try:
+        with open(settings_path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(settings, dict):
+        return
+    if "weights" in settings:
+        config["weights"] = settings["weights"]
+    if "paused" in settings:
+        config["paused"] = settings["paused"]
+
+
 def dispatcher_loop(config):
     dispatcher = FleetDispatcher(config, get_sys_path)
     while True:
+        load_fleet_settings(config)
         role = config.get("initial_role", "")
         if role.endswith("_lead"):
             dispatcher.recover_dead_workers()
@@ -638,6 +679,7 @@ def main():
     try:
         while True:
             check_commands(CONFIG)
+            load_fleet_settings(CONFIG)
             if CONFIG.get("paused"):
                 send_heartbeat(CONFIG, status="PAUSED")
                 time.sleep(2)

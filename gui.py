@@ -567,8 +567,9 @@ class RenderFleetApp(ctk.CTk):
         for widget in self.weights_frame.winfo_children():
             widget.destroy()
         self.weights_entries = {}
+        settings_path = os.path.join(self.syncthing_root, "_system", "settings.json")
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(settings_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
         except (OSError, json.JSONDecodeError):
             cfg = {}
@@ -615,14 +616,16 @@ class RenderFleetApp(ctk.CTk):
             except ValueError:
                 continue
 
+        settings_path = os.path.join(self.syncthing_root, "_system", "settings.json")
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(settings_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
         except (OSError, json.JSONDecodeError):
             cfg = {}
         cfg["weights"] = weights
         try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+            with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4)
             self._show_weights_feedback("Weights saved.")
         except OSError:
