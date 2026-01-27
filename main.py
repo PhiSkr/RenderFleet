@@ -8,16 +8,24 @@ import sys
 import time
 
 
-def load_config(path):
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+def load_config():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(base_dir, "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        print(f"✅ Config loaded from {config_path}")
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"❌ ERROR loading config at {config_path}: {e}")
+        raise
     if "paused" not in data:
         data["paused"] = False
     return data
 
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
-CONFIG = load_config(CONFIG_PATH)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+CONFIG = load_config()
 
 
 def get_sys_path(subpath):
