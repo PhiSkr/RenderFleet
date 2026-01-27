@@ -47,17 +47,42 @@ class WorkerCard(ctk.CTkFrame):
         last_seen_label = ctk.CTkLabel(self, text=f"Last Seen: {last_seen}")
         last_seen_label.pack(anchor="w", padx=12, pady=(0, 6))
 
+        btn_state = "normal" if is_online and time_diff <= 90 else "disabled"
+
+        power_row = ctk.CTkFrame(self, fg_color="transparent")
+        power_row.pack(fill="x", padx=12, pady=(0, 6))
+
+        start_btn = ctk.CTkButton(
+            power_row,
+            text="▶️ START",
+            width=110,
+            height=26,
+            fg_color="green",
+            command=lambda: self.send_command(worker_id, "start"),
+            state=btn_state,
+        )
+        start_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
+
+        stop_btn = ctk.CTkButton(
+            power_row,
+            text="⏸ STOP",
+            width=110,
+            height=26,
+            fg_color="red",
+            command=lambda: self.send_command(worker_id, "stop"),
+            state=btn_state,
+        )
+        stop_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
         button_row = ctk.CTkFrame(self, fg_color="transparent")
         button_row.pack(fill="x", padx=12, pady=(0, 8))
-
-        btn_state = "normal" if is_online and time_diff <= 90 else "disabled"
 
         img_btn = ctk.CTkButton(
             button_row,
             text="Set: ImgLead",
             width=110,
             height=26,
-            command=lambda: self.send_command(worker_id, "img_lead"),
+            command=lambda: self.send_command(worker_id, "set_role", "img_lead"),
             state=btn_state,
         )
         img_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
@@ -67,7 +92,7 @@ class WorkerCard(ctk.CTkFrame):
             text="Set: VidLead",
             width=110,
             height=26,
-            command=lambda: self.send_command(worker_id, "vid_lead"),
+            command=lambda: self.send_command(worker_id, "set_role", "vid_lead"),
             state=btn_state,
         )
         vid_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
@@ -77,7 +102,7 @@ class WorkerCard(ctk.CTkFrame):
             text="Set: ImgWork",
             width=110,
             height=26,
-            command=lambda: self.send_command(worker_id, "img_worker"),
+            command=lambda: self.send_command(worker_id, "set_role", "img_worker"),
             state=btn_state,
         )
         img_worker_btn.grid(row=1, column=0, padx=4, pady=4, sticky="w")
@@ -87,7 +112,7 @@ class WorkerCard(ctk.CTkFrame):
             text="Set: VidWork",
             width=110,
             height=26,
-            command=lambda: self.send_command(worker_id, "vid_worker"),
+            command=lambda: self.send_command(worker_id, "set_role", "vid_worker"),
             state=btn_state,
         )
         vid_worker_btn.grid(row=1, column=1, padx=4, pady=4, sticky="w")
@@ -95,10 +120,12 @@ class WorkerCard(ctk.CTkFrame):
         self.feedback_label = ctk.CTkLabel(self, text="", text_color="#2ecc71")
         self.feedback_label.pack(anchor="w", padx=12, pady=(0, 10))
 
-    def send_command(self, worker_id, role_value):
+    def send_command(self, worker_id, action, value=None):
         if not worker_id:
             return
-        cmd = {"action": "set_role", "value": role_value}
+        cmd = {"action": action}
+        if value is not None:
+            cmd["value"] = value
         cmd_path = os.path.expanduser(
             os.path.join("~", "RenderFleet", "_system", "commands", f"{worker_id}.cmd")
         )

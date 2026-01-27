@@ -10,7 +10,10 @@ import time
 
 def load_config(path):
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if "paused" not in data:
+        data["paused"] = False
+    return data
 
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -75,8 +78,33 @@ def check_commands(config):
                     pass
                 print(f"⚙️ ROLE CHANGED to {new_role}")
         elif action == "stop":
-            print("🛑 Remote Stop received.")
-            sys.exit(0)
+            config["paused"] = True
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    cfg_on_disk = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                cfg_on_disk = {}
+            cfg_on_disk["paused"] = True
+            try:
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(cfg_on_disk, f, indent=4)
+            except OSError:
+                pass
+            print("🛑 PAUSED Work.")
+        elif action == "start":
+            config["paused"] = False
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    cfg_on_disk = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                cfg_on_disk = {}
+            cfg_on_disk["paused"] = False
+            try:
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(cfg_on_disk, f, indent=4)
+            except OSError:
+                pass
+            print("▶️ RESUMED Work.")
         else:
             return False
     finally:
@@ -346,6 +374,10 @@ def main():
     try:
         while True:
             check_commands(CONFIG)
+            if CONFIG.get("paused"):
+                send_heartbeat(CONFIG, status="PAUSED")
+                time.sleep(2)
+                continue
             dispatch_jobs(CONFIG)
             did_work = process_jobs(CONFIG)
             if did_work:
