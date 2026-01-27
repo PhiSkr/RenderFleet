@@ -110,17 +110,20 @@ class FleetDispatcher:
         return idle_workers
 
     def get_next_job(self, queue_path, config_weights):
+        self.logger(f"DEBUG: Scanning queue at {queue_path}")
         try:
             entries = [
                 os.path.join(queue_path, f)
                 for f in os.listdir(queue_path)
                 if not f.startswith(".")
             ]
-        except OSError:
+        except OSError as e:
+            self.logger(f"DEBUG: Failed to list queue: {e}")
             entries = []
 
         jobs = [p for p in entries if os.path.isfile(p) or os.path.isdir(p)]
         if not jobs:
+            self.logger("DEBUG: Queue empty (0 valid jobs found).")
             return None
 
         weights_cfg = config_weights or {}
@@ -148,8 +151,10 @@ class FleetDispatcher:
         for job, weight in weighted_jobs:
             running += weight
             if pick <= running:
+                self.logger(f"DEBUG: Selected job: {os.path.basename(job)}")
                 return job
 
+        self.logger(f"DEBUG: Selected job: {os.path.basename(jobs[0])}")
         return jobs[0]
 
     def enforce_vip_preemption(self, queue_path, active_floor_path):
@@ -220,6 +225,7 @@ class FleetDispatcher:
 
     def dispatch_smart(self):
         role = self.config.get("initial_role")
+        self.logger(f"DEBUG: Dispatching for role {role}")
         if role == "img_lead":
             source_rel = os.path.join("01_job_factory", "img_queue")
             target_type = "img"
@@ -229,8 +235,10 @@ class FleetDispatcher:
         else:
             return
 
+        self.logger(f"DEBUG: Dispatching for role {role}, looking in {source_rel}")
         source_path = self.get_sys_path(source_rel)
         idle_workers = self._get_idle_workers(target_type=target_type)
+        self.logger(f"DEBUG: Found {len(idle_workers)} idle workers: {idle_workers}")
         if not idle_workers:
             return
 
@@ -243,9 +251,11 @@ class FleetDispatcher:
         inbox_path = self.get_sys_path(os.path.join("02_active_floor", worker_id, "inbox"))
         os.makedirs(inbox_path, exist_ok=True)
         try:
+            self.logger(f"DEBUG: Attempting to move {filename} to {inbox_path}")
             shutil.move(job_path, os.path.join(inbox_path, filename))
             self.logger(f"CMD: Dispatched {filename} to {worker_id}")
-        except OSError:
+        except Exception as e:
+            self.logger(f"❌ DISPATCH ERROR: Failed to move {filename}. Reason: {e}")
             return
 
     def recover_dead_workers(self):
