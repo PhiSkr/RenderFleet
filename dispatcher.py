@@ -178,7 +178,7 @@ class FleetDispatcher:
                 buckets.setdefault(matched_key, []).append(job)
             else:
                 self.logger(
-                    f\"DEBUG: ℹ️ No keyword found in {name}, falling back to 'default' ({default_weight})\"
+                    f"DEBUG: ℹ️ No keyword found in {name}, falling back to 'default' ({default_weight})"
                 )
                 buckets.setdefault("default", []).append(job)
 
