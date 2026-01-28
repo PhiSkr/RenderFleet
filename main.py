@@ -175,11 +175,22 @@ class ActionaRunner:
     def _move_landing_zone_images(self, landing_zone, completed_dir, job_name=None):
         os.makedirs(completed_dir, exist_ok=True)
         moved = []
+        print(
+            f"DEBUG: Checking Landing Zone at '{landing_zone}'. Exists? {os.path.exists(landing_zone)}"
+        )
+        try:
+            landing_contents = os.listdir(landing_zone)
+        except OSError:
+            landing_contents = []
+        print(f"DEBUG: content of landing zone: {landing_contents}")
+        image_exts = {".png", ".jpg", ".jpeg"}
         files = [
             name
-            for name in os.listdir(landing_zone)
+            for name in landing_contents
             if os.path.isfile(os.path.join(landing_zone, name))
+            and os.path.splitext(name)[1].lower() in image_exts
         ]
+        print(f"DEBUG: Filtered image files found: {files}")
         files.sort(key=lambda name: os.path.getctime(os.path.join(landing_zone, name)))
         for idx, name in enumerate(files, start=1):
             src = os.path.join(landing_zone, name)
@@ -691,6 +702,9 @@ def process_jobs(config):
     filename = os.path.basename(job_path)
     print(f"⚡ Job found: {filename}")
     send_heartbeat(config, status="BUSY", current_job=filename)
+    hb_callback = lambda: send_heartbeat(
+        config, status="BUSY", current_job=filename
+    )
 
     ext = os.path.splitext(filename)[1].lower()
     if os.path.isfile(job_path) and ext == ".txt":
@@ -729,9 +743,7 @@ def process_jobs(config):
                 output_dir=target_dir,
                 job_name=prompt_job_name,
                 is_image=True,
-                heartbeat_callback=lambda: send_heartbeat(
-                    config, status="BUSY", current_job=filename
-                ),
+                heartbeat_callback=hb_callback,
             )
             if result:
                 completed.append(prompt_job_name)
@@ -765,6 +777,9 @@ def process_jobs(config):
                     pass
                 return True
         os.makedirs(review_path, exist_ok=True)
+        if not os.path.exists(job_path):
+            print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
+            return False
         shutil.move(job_path, os.path.join(target_dir, filename))
         print(f"✅ Job finished: {filename}")
         return True
@@ -823,9 +838,7 @@ def process_jobs(config):
                 output_ext=".mp4",
                 num_outputs=2,
                 prompt_text=prompt_text,
-                heartbeat_callback=lambda: send_heartbeat(
-                    config, status="BUSY", current_job=filename
-                ),
+                heartbeat_callback=hb_callback,
             )
             if success:
                 completed.append(image_name)
@@ -852,6 +865,9 @@ def process_jobs(config):
 
         archive_path = get_sys_path("04_archive")
         os.makedirs(archive_path, exist_ok=True)
+        if not os.path.exists(job_path):
+            print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
+            return False
         shutil.move(job_path, os.path.join(archive_path, filename))
         print(f"✅ Video Job finished: {filename}")
         return True
@@ -862,11 +878,12 @@ def process_jobs(config):
         "",
         output_dir=None,
         job_name=None,
-        heartbeat_callback=lambda: send_heartbeat(
-            config, status="BUSY", current_job=filename
-        ),
+        heartbeat_callback=hb_callback,
     )
     os.makedirs(review_path, exist_ok=True)
+    if not os.path.exists(job_path):
+        print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
+        return False
     shutil.move(job_path, os.path.join(review_path, filename))
     print(f"✅ Job finished: {filename}")
     return True
