@@ -48,8 +48,18 @@ def load_config():
         config["paused"] = False
     if "weights" not in config:
         config["weights"] = {"default": 10}
-    if "display" not in config:
-        config["display"] = ":1"
+
+    env_display = os.environ.get("DISPLAY")
+    if env_display:
+        config["display"] = env_display
+        local_data["display"] = env_display
+        try:
+            with open(local_config_path, "w", encoding="utf-8") as f:
+                json.dump(local_data, f, indent=4)
+        except OSError:
+            pass
+    elif "display" not in config:
+        config["display"] = ":0"
 
     root = config.get("syncthing_root") or "~/RenderFleet"
     root = os.path.abspath(os.path.expanduser(root))
@@ -123,11 +133,10 @@ class ActionaRunner:
     def __init__(self, config, get_sys_path):
         self.config = config
         self.get_sys_path = get_sys_path
-        self.display = config.get("display", ":1")
 
     def _build_env(self):
         env = os.environ.copy()
-        env["DISPLAY"] = self.display
+        env["DISPLAY"] = self.config.get("display", ":0")
         return env
 
     def _clear_dir_files(self, path):
@@ -165,6 +174,7 @@ class ActionaRunner:
 
     def _move_landing_zone_images(self, landing_zone, completed_dir, job_name=None):
         os.makedirs(completed_dir, exist_ok=True)
+        moved = []
         files = [
             name
             for name in os.listdir(landing_zone)
@@ -182,13 +192,18 @@ class ActionaRunner:
             try:
                 shutil.move(src, dest)
                 print(f"♻️ Collected and moved {name} -> {new_name}")
+                moved.append(dest)
             except OSError:
                 continue
+        return moved
 
     def _run_refresh(self, env):
-        refresh_script = self.get_sys_path(
-            os.path.join("_system", "scripts", "higgsfield_refresh.ascr")
+        refresh_script_cfg = (
+            self.config.get("scripts", {}).get("refresh")
+            or self.config.get("refresh_script")
+            or os.path.join("_system", "scripts", "higgsfield_refresh.ascr")
         )
+        refresh_script = self.get_sys_path(refresh_script_cfg)
         cmd = ["actexec", refresh_script]
         try:
             proc = subprocess.Popen(cmd, env=env)
@@ -196,32 +211,114 @@ class ActionaRunner:
         except OSError:
             pass
 
-    def _check_flags(self, flags_dir, sensitive_retry_used):
+    def _consume_flags(self, flags_dir):
         image_open_fail = os.path.join(flags_dir, "ImageOpenFail.txt")
         no_hotbar = os.path.join(flags_dir, "NOHOTBAR.txt")
         sensitive = os.path.join(flags_dir, "SENSITIVE.txt")
 
-        if os.path.exists(image_open_fail) or os.path.exists(no_hotbar):
-            for path in (image_open_fail, no_hotbar):
-                if os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
-            return "retry_refresh"
+        has_image_open_fail = os.path.exists(image_open_fail)
+        has_no_hotbar = os.path.exists(no_hotbar)
+        has_sensitive = os.path.exists(sensitive)
 
-        if os.path.exists(sensitive):
-            try:
-                os.remove(sensitive)
-            except OSError:
-                pass
-            if sensitive_retry_used:
-                return "skip"
+        for path in (image_open_fail, no_hotbar, sensitive):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        if has_image_open_fail or has_no_hotbar:
+            return "retry_refresh"
+        if has_sensitive:
             return "retry_sensitive"
 
         return None
 
-    def _run_image_job(self, arguments, job_name=None, output_dir=None):
+    def _resolve_script_path(self, script_key):
+        scripts = self.config.get("scripts", {})
+        script_path_cfg = scripts.get(script_key, script_key)
+        if os.path.isabs(script_path_cfg):
+            return os.path.abspath(os.path.expanduser(script_path_cfg))
+        return self.get_sys_path(script_path_cfg)
+
+    def _execute_with_watchdog(self, cmd, env, landing_zone, watch_images=True):
+        start_time = time.time()
+        first_output_time = None
+        last_output_time = None
+        seen_files = set()
+        partial_success = False
+
+        try:
+            print(f"[DEBUG] Executing: {' '.join(cmd)}")
+            proc = subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except OSError:
+            return {"start_failed": True}
+
+        while True:
+            now = time.time()
+            if watch_images:
+                current_files = self._list_image_files(landing_zone)
+                for name in current_files:
+                    if name not in seen_files:
+                        seen_files.add(name)
+                        if first_output_time is None:
+                            first_output_time = now
+                        last_output_time = now
+
+                if (
+                    first_output_time is not None
+                    and last_output_time is not None
+                    and now - last_output_time > self.INTER_IMAGE_TIMEOUT_SECONDS
+                ):
+                    self._terminate_process(proc)
+                    partial_success = True
+                    break
+
+            if now - start_time > self.GLOBAL_TIMEOUT_SECONDS:
+                self._terminate_process(proc)
+                return {"retry_reason": "global_timeout"}
+
+            if proc.poll() is not None:
+                break
+
+            time.sleep(10)
+
+        stdout_data = ""
+        stderr_data = ""
+        if proc.poll() is not None:
+            try:
+                stdout_data, stderr_data = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._terminate_process(proc)
+                try:
+                    stdout_data, stderr_data = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+
+        return {
+            "partial_success": partial_success,
+            "returncode": proc.returncode,
+            "stdout": stdout_data,
+            "stderr": stderr_data,
+        }
+
+    def run(
+        self,
+        script_key,
+        arguments,
+        output_dir=None,
+        job_name=None,
+        output_ext=".png",
+        num_outputs=4,
+        prompt_text=None,
+        is_image=False,
+    ):
         landing_zone_cfg = self.config.get("landing_zone", "")
         landing_zone = self.get_sys_path(landing_zone_cfg)
         flags_dir = self.get_sys_path(os.path.join("_system", "flags"))
@@ -230,167 +327,93 @@ class ActionaRunner:
             if output_dir
             else self.get_sys_path(os.path.join("03_review_room"))
         )
-        image_script_cfg = (
-            self.config.get("scripts", {}).get("img_gen")
-            or os.path.join("_system", "scripts", "higgsfield_image.ascr")
-        )
-        image_script = self.get_sys_path(image_script_cfg)
-        env = os.environ.copy()
-        env["DISPLAY"] = self.config.get("display", ":1")
-        sensitive_retry_used = False
+        script_path = self._resolve_script_path(script_key)
+        if not os.path.exists(script_path):
+            print(f"❌ Script not found: {script_path}")
+            return False
+
+        env = self._build_env()
         max_attempts = 2
+        watch_images = is_image or (
+            output_ext and output_ext.lower() in {".png", ".jpg", ".jpeg"}
+        )
 
         for attempt in range(1, max_attempts + 1):
             self._clear_dir_files(flags_dir)
             self._clear_dir_files(landing_zone)
-            start_time = time.time()
-            first_image_time = None
-            last_image_time = None
-            seen_files = set()
 
-            cmd = ["actexec", image_script]
+            cmd = ["actexec", script_path]
             if arguments:
                 cmd.append(arguments)
-            try:
-                proc = subprocess.Popen(cmd, env=env)
-            except OSError:
-                return False
 
-            retry_reason = None
-            while True:
-                now = time.time()
-                flag_action = self._check_flags(flags_dir, sensitive_retry_used)
-                if flag_action == "retry_refresh":
-                    self._terminate_process(proc)
-                    self._run_refresh(env)
-                    retry_reason = "retry"
-                    break
-                if flag_action == "retry_sensitive":
-                    sensitive_retry_used = True
-                    self._terminate_process(proc)
-                    retry_reason = "retry"
-                    break
-                if flag_action == "skip":
-                    self._terminate_process(proc)
-                    retry_reason = "skip"
-                    break
-
-                current_files = self._list_image_files(landing_zone)
-                if current_files:
-                    for name in current_files:
-                        if name not in seen_files:
-                            seen_files.add(name)
-                            if first_image_time is None:
-                                first_image_time = now
-                            last_image_time = now
-
-                if (
-                    first_image_time is not None
-                    and last_image_time is not None
-                    and now - last_image_time > self.INTER_IMAGE_TIMEOUT_SECONDS
-                ):
-                    self._terminate_process(proc)
-                    break
-
-                if now - start_time > self.GLOBAL_TIMEOUT_SECONDS:
-                    self._terminate_process(proc)
-                    self._run_refresh(env)
-                    retry_reason = "retry"
-                    break
-
-                if proc.poll() is not None:
-                    break
-
-                time.sleep(10)
-
-            if retry_reason is None:
-                post_flag_action = self._check_flags(flags_dir, sensitive_retry_used)
-                if post_flag_action == "retry_refresh":
-                    self._run_refresh(env)
-                    retry_reason = "retry"
-                elif post_flag_action == "retry_sensitive":
-                    sensitive_retry_used = True
-                    retry_reason = "retry"
-                elif post_flag_action == "skip":
-                    retry_reason = "skip"
-
-            self._move_landing_zone_images(
-                landing_zone, completed_dir, job_name=job_name
+            result = self._execute_with_watchdog(
+                cmd,
+                env,
+                landing_zone,
+                watch_images=watch_images,
             )
 
-            if retry_reason == "retry":
+            if result.get("start_failed"):
+                return False
+            if result.get("retry_reason") == "global_timeout":
+                self._run_refresh(env)
                 if attempt < max_attempts:
                     continue
                 return False
-            if retry_reason == "skip":
-                return "skipped"
+
+            flag_action = self._consume_flags(flags_dir)
+            if flag_action == "retry_refresh":
+                self._run_refresh(env)
+                if attempt < max_attempts:
+                    continue
+                return False
+            if flag_action == "retry_sensitive":
+                if attempt < max_attempts:
+                    continue
+                return False
+
+            if (
+                not result.get("partial_success")
+                and result.get("returncode") not in (0, None)
+            ):
+                if result.get("stderr"):
+                    print(result["stderr"])
+                return False
+
+            if is_image:
+                moved_images = self._move_landing_zone_images(
+                    landing_zone, completed_dir, job_name=job_name
+                )
+                if not moved_images:
+                    print(
+                        "⚠️ Actiona finished but NO images were produced. Marking as failed."
+                    )
+                    return False
+                return True
+
+            if not output_dir or not job_name:
+                return False
+
+            os.makedirs(output_dir, exist_ok=True)
+            files = [
+                os.path.join(landing_zone, f)
+                for f in os.listdir(landing_zone)
+                if os.path.isfile(os.path.join(landing_zone, f))
+            ]
+            if output_ext:
+                files = [f for f in files if f.lower().endswith(output_ext)]
+            files.sort(key=os.path.getctime)
+
+            for idx, src in enumerate(files[:num_outputs], start=1):
+                new_name = f"{job_name}_take{idx:03d}{output_ext}"
+                dest = os.path.join(output_dir, new_name)
+                shutil.move(src, dest)
+                print(
+                    f"♻️ Collected and renamed {os.path.basename(src)} -> {new_name}"
+                )
             return True
 
         return False
-
-    def run_actiona(
-        self,
-        script_path,
-        arguments,
-        config,
-        output_dir=None,
-        job_name=None,
-        output_ext=".png",
-        num_outputs=4,
-        prompt_text=None,
-        is_image=False,
-    ):
-        landing_zone_cfg = config.get("landing_zone", "")
-        landing_zone = self.get_sys_path(landing_zone_cfg)
-        flags_dir = self.get_sys_path(os.path.join("_system", "flags"))
-        self._clear_dir_files(flags_dir)
-        self._clear_dir_files(landing_zone)
-
-        if is_image:
-            return self._run_image_job(
-                arguments,
-                job_name=job_name,
-                output_dir=output_dir,
-            )
-
-        env = os.environ.copy()
-        env["DISPLAY"] = config.get("display", ":1")
-        try:
-            resolved_script_path = (
-                script_path
-                if os.path.isabs(script_path)
-                else self.get_sys_path(script_path)
-            )
-            cmd = ["actexec", resolved_script_path]
-            if arguments:
-                cmd.append(arguments)
-            proc = subprocess.Popen(cmd, env=env)
-            proc.wait()
-        except OSError:
-            return False
-
-        if not output_dir or not job_name:
-            return False
-
-        os.makedirs(output_dir, exist_ok=True)
-        files = [
-            os.path.join(landing_zone, f)
-            for f in os.listdir(landing_zone)
-            if os.path.isfile(os.path.join(landing_zone, f))
-        ]
-        if output_ext:
-            files = [f for f in files if f.lower().endswith(output_ext)]
-        files.sort(key=os.path.getctime)
-
-        for idx, src in enumerate(files[:num_outputs], start=1):
-            new_name = f"{job_name}_take{idx:03d}{output_ext}"
-            dest = os.path.join(output_dir, new_name)
-            shutil.move(src, dest)
-            print(f"♻️ Collected and renamed {os.path.basename(src)} -> {new_name}")
-        return True
-
-
-ACTIONA = ActionaRunner(CONFIG, get_sys_path)
 
 
 def send_heartbeat(config, status="IDLE", current_job=None):
@@ -617,6 +640,7 @@ def process_jobs(config):
     review_rel = "03_review_room"
     inbox_path = get_sys_path(inbox_rel)
     review_path = get_sys_path(review_rel)
+    runner = ActionaRunner(config, get_sys_path)
 
     try:
         entries = sorted(os.listdir(inbox_path))
@@ -667,10 +691,9 @@ def process_jobs(config):
             if prompt_job_name in completed:
                 continue
             print(f"🎨 Generating Image for prompt: \"{prompt}\"")
-            result = run_actiona(
-                config["scripts"]["img_gen"],
+            result = runner.run(
+                "img_gen",
                 prompt,
-                config,
                 output_dir=target_dir,
                 job_name=prompt_job_name,
                 is_image=True,
@@ -765,10 +788,9 @@ def process_jobs(config):
                 continue
 
             print(f"unknown staging image: {image_name}")
-            success = run_actiona(
-                config["scripts"]["vid_gen"],
+            success = runner.run(
+                "vid_gen",
                 "",
-                config,
                 output_dir=job_path,
                 job_name=f"{image_name}_vid",
                 output_ext=".mp4",
@@ -804,7 +826,7 @@ def process_jobs(config):
         return True
 
     print(f"🎥 Starting Video Generation for: {filename}")
-    run_actiona(config["scripts"]["vid_gen"], "", config, output_dir=None, job_name=None)
+    runner.run("vid_gen", "", output_dir=None, job_name=None)
     os.makedirs(review_path, exist_ok=True)
     shutil.move(job_path, os.path.join(review_path, filename))
     print(f"✅ Job finished: {filename}")
@@ -872,30 +894,6 @@ def dispatch_jobs(config):
     os.makedirs(inbox_path, exist_ok=True)
     shutil.move(job_path, os.path.join(inbox_path, filename))
     print(f"CMD: Dispatched {filename} to {worker_id}")
-
-
-def run_actiona(
-    script_path,
-    arguments,
-    config,
-    output_dir=None,
-    job_name=None,
-    output_ext=".png",
-    num_outputs=4,
-    prompt_text=None,
-    is_image=False,
-):
-    return ACTIONA.run_actiona(
-        script_path,
-        arguments,
-        config,
-        output_dir=output_dir,
-        job_name=job_name,
-        output_ext=output_ext,
-        num_outputs=num_outputs,
-        prompt_text=prompt_text,
-        is_image=is_image,
-    )
 
 
 def main():
