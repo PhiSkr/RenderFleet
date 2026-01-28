@@ -193,8 +193,15 @@ class ActionaRunner:
                 shutil.move(src, dest)
                 print(f"♻️ Collected and moved {name} -> {new_name}")
                 moved.append(dest)
-            except OSError:
-                continue
+            except OSError as e:
+                print(f"❌ ERROR moving {name} to {dest}: {e}")
+                try:
+                    shutil.copy2(src, dest)
+                    os.remove(src)
+                    print(f"⚠️ Fallback: Copied and removed {name}")
+                    moved.append(dest)
+                except OSError as e2:
+                    print(f"❌ CRITICAL: Failed to move/copy {name}: {e2}")
         return moved
 
     def _run_refresh(self, env):
@@ -241,7 +248,14 @@ class ActionaRunner:
             return os.path.abspath(os.path.expanduser(script_path_cfg))
         return self.get_sys_path(script_path_cfg)
 
-    def _execute_with_watchdog(self, cmd, env, landing_zone, watch_images=True):
+    def _execute_with_watchdog(
+        self,
+        cmd,
+        env,
+        landing_zone,
+        watch_images=True,
+        heartbeat_callback=None,
+    ):
         start_time = time.time()
         first_output_time = None
         last_output_time = None
@@ -261,6 +275,8 @@ class ActionaRunner:
             return {"start_failed": True}
 
         while True:
+            if heartbeat_callback:
+                heartbeat_callback()
             now = time.time()
             if watch_images:
                 current_files = self._list_image_files(landing_zone)
@@ -318,6 +334,7 @@ class ActionaRunner:
         num_outputs=4,
         prompt_text=None,
         is_image=False,
+        heartbeat_callback=None,
     ):
         landing_zone_cfg = self.config.get("landing_zone", "")
         landing_zone = self.get_sys_path(landing_zone_cfg)
@@ -364,6 +381,7 @@ class ActionaRunner:
                 env,
                 landing_zone,
                 watch_images=watch_images,
+                heartbeat_callback=heartbeat_callback,
             )
 
             if result.get("start_failed"):
@@ -691,7 +709,8 @@ def process_jobs(config):
             with open(progress_path, "r", encoding="utf-8") as f:
                 progress_data = json.load(f)
                 completed = progress_data.get("completed_files", [])
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"⚠️ Could not load progress.json: {e}")
             completed = []
 
         prompt_index = 0
@@ -710,6 +729,9 @@ def process_jobs(config):
                 output_dir=target_dir,
                 job_name=prompt_job_name,
                 is_image=True,
+                heartbeat_callback=lambda: send_heartbeat(
+                    config, status="BUSY", current_job=filename
+                ),
             )
             if result:
                 completed.append(prompt_job_name)
@@ -729,8 +751,9 @@ def process_jobs(config):
                             f,
                             indent=4,
                         )
-                except OSError:
-                    pass
+                    print(f"💾 Progress saved. {len(completed)} prompts done.")
+                except OSError as e:
+                    print(f"❌ ERROR writing progress.json: {e}")
             print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
@@ -765,7 +788,8 @@ def process_jobs(config):
             with open(progress_path, "r", encoding="utf-8") as f:
                 progress_data = json.load(f)
                 completed = progress_data.get("completed_files", [])
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"⚠️ Could not load progress.json: {e}")
             completed = []
         for image_name in images:
             if image_name in completed:
@@ -799,6 +823,9 @@ def process_jobs(config):
                 output_ext=".mp4",
                 num_outputs=2,
                 prompt_text=prompt_text,
+                heartbeat_callback=lambda: send_heartbeat(
+                    config, status="BUSY", current_job=filename
+                ),
             )
             if success:
                 completed.append(image_name)
@@ -809,8 +836,9 @@ def process_jobs(config):
                             f,
                             indent=4,
                         )
-                except OSError:
-                    pass
+                    print(f"💾 Progress saved. {len(completed)} prompts done.")
+                except OSError as e:
+                    print(f"❌ ERROR writing progress.json: {e}")
             print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
@@ -829,7 +857,15 @@ def process_jobs(config):
         return True
 
     print(f"🎥 Starting Video Generation for: {filename}")
-    runner.run("vid_gen", "", output_dir=None, job_name=None)
+    runner.run(
+        "vid_gen",
+        "",
+        output_dir=None,
+        job_name=None,
+        heartbeat_callback=lambda: send_heartbeat(
+            config, status="BUSY", current_job=filename
+        ),
+    )
     os.makedirs(review_path, exist_ok=True)
     shutil.move(job_path, os.path.join(review_path, filename))
     print(f"✅ Job finished: {filename}")
