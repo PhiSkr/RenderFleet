@@ -189,9 +189,10 @@ class ActionaRunner:
         refresh_script = self.get_sys_path(
             os.path.join("_system", "scripts", "higgsfield_refresh.ascr")
         )
-        cmd = ["actexec", "-e", refresh_script]
+        cmd = ["actexec", refresh_script]
         try:
-            subprocess.run(cmd, check=False, env=env)
+            proc = subprocess.Popen(cmd, env=env)
+            proc.wait()
         except OSError:
             pass
 
@@ -234,7 +235,8 @@ class ActionaRunner:
             or os.path.join("_system", "scripts", "higgsfield_image.ascr")
         )
         image_script = self.get_sys_path(image_script_cfg)
-        env = self._build_env()
+        env = os.environ.copy()
+        env["DISPLAY"] = self.config.get("display", ":1")
         sensitive_retry_used = False
         max_attempts = 2
 
@@ -321,7 +323,7 @@ class ActionaRunner:
                     continue
                 return False
             if retry_reason == "skip":
-                return False
+                return "skipped"
             return True
 
         return False
@@ -338,6 +340,12 @@ class ActionaRunner:
         prompt_text=None,
         is_image=False,
     ):
+        landing_zone_cfg = config.get("landing_zone", "")
+        landing_zone = self.get_sys_path(landing_zone_cfg)
+        flags_dir = self.get_sys_path(os.path.join("_system", "flags"))
+        self._clear_dir_files(flags_dir)
+        self._clear_dir_files(landing_zone)
+
         if is_image:
             return self._run_image_job(
                 arguments,
@@ -345,29 +353,19 @@ class ActionaRunner:
                 output_dir=output_dir,
             )
 
-        landing_zone_cfg = config.get("landing_zone", "")
-        landing_zone = self.get_sys_path(landing_zone_cfg)
-        os.makedirs(landing_zone, exist_ok=True)
-
-        for entry in os.listdir(landing_zone):
-            path = os.path.join(landing_zone, entry)
-            if os.path.isfile(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-
-        env = self._build_env()
+        env = os.environ.copy()
+        env["DISPLAY"] = config.get("display", ":1")
         try:
             resolved_script_path = (
                 script_path
                 if os.path.isabs(script_path)
                 else self.get_sys_path(script_path)
             )
-            cmd = ["actexec", "-e", resolved_script_path]
+            cmd = ["actexec", resolved_script_path]
             if arguments:
                 cmd.append(arguments)
-            subprocess.run(cmd, check=False, env=env)
+            proc = subprocess.Popen(cmd, env=env)
+            proc.wait()
         except OSError:
             return False
 

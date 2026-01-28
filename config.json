@@ -7,8 +7,7 @@
     "staging_prompts": "~/RenderFleet/_system/staging_prompts",
     "display": ":1",
     "scripts": {
-        "img_gen": "/home/worker001/RenderFleet_Code/scripts/image_gen_dummy.ascr",
-        "vid_gen": "/home/worker001/RenderFleet_Code/scripts/video_gen_dummy.ascr",
-        "dry_run": true
+        "img_gen": "/home/worker001/RenderFleet/_system/scripts/higgsfield_image.ascr",
+        "vid_gen": "/home/worker001/RenderFleet_Code/scripts/video_gen_dummy.ascr"
     }
 }
