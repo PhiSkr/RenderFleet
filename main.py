@@ -112,6 +112,7 @@ print(f"DEBUG: Heartbeat Path value: '{CONFIG.get('heartbeat_path')}'")
 
 
 def get_sys_path(subpath):
+    subpath = os.path.expanduser(subpath)
     root = CONFIG.get("syncthing_root")
     if not root:
         root = os.path.expanduser("~/RenderFleet")
@@ -124,6 +125,16 @@ def get_sys_path(subpath):
     if not os.path.exists(full_path):
         print(f"DEBUG: Path resolution: '{subpath}' -> '{full_path}'")
     return full_path
+
+
+def log_activity(msg):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    log_path = os.path.join(BASE_DIR, "job_activity.log")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {msg}\n")
+    except OSError:
+        pass
 
 
 class ActionaRunner:
@@ -701,6 +712,7 @@ def process_jobs(config):
 
     filename = os.path.basename(job_path)
     print(f"⚡ Job found: {filename}")
+    log_activity(f"⚡ Job found: {filename}")
     send_heartbeat(config, status="BUSY", current_job=filename)
     hb_callback = lambda: send_heartbeat(
         config, status="BUSY", current_job=filename
@@ -723,8 +735,12 @@ def process_jobs(config):
             with open(progress_path, "r", encoding="utf-8") as f:
                 progress_data = json.load(f)
                 completed = progress_data.get("completed_files", [])
+        except FileNotFoundError:
+            print("DEBUG: No progress.json found (starting fresh).")
+            completed = []
         except (OSError, json.JSONDecodeError) as e:
             print(f"⚠️ Could not load progress.json: {e}")
+            log_activity(f"❌ ERROR: Could not load progress.json: {e}")
             completed = []
 
         prompt_index = 0
@@ -747,6 +763,7 @@ def process_jobs(config):
             )
             if result:
                 completed.append(prompt_job_name)
+                log_activity(f"✅ Image set done: {prompt_job_name}")
                 if result == "skipped":
                     skipped_marker = os.path.join(
                         target_dir, f"{prompt_job_name}_SKIPPED.txt"
@@ -766,6 +783,9 @@ def process_jobs(config):
                     print(f"💾 Progress saved. {len(completed)} prompts done.")
                 except OSError as e:
                     print(f"❌ ERROR writing progress.json: {e}")
+                    log_activity(f"❌ ERROR: writing progress.json failed: {e}")
+            else:
+                log_activity(f"❌ ERROR: Image set failed: {prompt_job_name}")
             print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
@@ -782,6 +802,7 @@ def process_jobs(config):
             return False
         shutil.move(job_path, os.path.join(target_dir, filename))
         print(f"✅ Job finished: {filename}")
+        log_activity(f"✅ Job finished: {filename}")
         return True
 
     if os.path.isdir(job_path):
@@ -803,8 +824,12 @@ def process_jobs(config):
             with open(progress_path, "r", encoding="utf-8") as f:
                 progress_data = json.load(f)
                 completed = progress_data.get("completed_files", [])
+        except FileNotFoundError:
+            print("DEBUG: No progress.json found (starting fresh).")
+            completed = []
         except (OSError, json.JSONDecodeError) as e:
             print(f"⚠️ Could not load progress.json: {e}")
+            log_activity(f"❌ ERROR: Could not load progress.json: {e}")
             completed = []
         for image_name in images:
             if image_name in completed:
@@ -852,6 +877,9 @@ def process_jobs(config):
                     print(f"💾 Progress saved. {len(completed)} prompts done.")
                 except OSError as e:
                     print(f"❌ ERROR writing progress.json: {e}")
+                    log_activity(f"❌ ERROR: writing progress.json failed: {e}")
+            else:
+                log_activity(f"❌ ERROR: Video generation failed: {image_name}")
             print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
@@ -870,6 +898,7 @@ def process_jobs(config):
             return False
         shutil.move(job_path, os.path.join(archive_path, filename))
         print(f"✅ Video Job finished: {filename}")
+        log_activity(f"✅ Job finished: {filename}")
         return True
 
     print(f"🎥 Starting Video Generation for: {filename}")
@@ -886,6 +915,7 @@ def process_jobs(config):
         return False
     shutil.move(job_path, os.path.join(review_path, filename))
     print(f"✅ Job finished: {filename}")
+    log_activity(f"✅ Job finished: {filename}")
     return True
 
 
