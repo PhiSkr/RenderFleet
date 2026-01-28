@@ -342,9 +342,22 @@ class ActionaRunner:
             self._clear_dir_files(flags_dir)
             self._clear_dir_files(landing_zone)
 
+            staging_prompts_cfg = self.config.get("staging_prompts") or os.path.join(
+                "~/RenderFleet", "_system", "staging_prompts"
+            )
+            staging_prompts = os.path.abspath(
+                os.path.expanduser(staging_prompts_cfg)
+            )
+            os.makedirs(staging_prompts, exist_ok=True)
+            prompt_path = os.path.join(staging_prompts, "current_prompt.txt")
+            prompt_text = "" if arguments is None else str(arguments)
+            try:
+                with open(prompt_path, "w", encoding="utf-8") as f:
+                    f.write(prompt_text)
+            except OSError:
+                pass
+
             cmd = ["actexec", script_path]
-            if arguments:
-                cmd.append(arguments)
 
             result = self._execute_with_watchdog(
                 cmd,
@@ -765,16 +778,6 @@ def process_jobs(config):
             except OSError:
                 prompt_text = ""
 
-            try:
-                with open(
-                    os.path.join(staging_prompts, "current_prompt.txt"),
-                    "w",
-                    encoding="utf-8",
-                ) as f:
-                    f.write(prompt_text)
-            except OSError:
-                pass
-
             for entry in os.listdir(staging_area):
                 path = os.path.join(staging_area, entry)
                 if os.path.isfile(path):
@@ -790,7 +793,7 @@ def process_jobs(config):
             print(f"unknown staging image: {image_name}")
             success = runner.run(
                 "vid_gen",
-                "",
+                prompt_text,
                 output_dir=job_path,
                 job_name=f"{image_name}_vid",
                 output_ext=".mp4",
