@@ -165,7 +165,11 @@ class ActionaRunner:
 
     def _move_landing_zone_images(self, landing_zone, completed_dir, job_name=None):
         os.makedirs(completed_dir, exist_ok=True)
-        files = self._list_image_files(landing_zone)
+        files = [
+            name
+            for name in os.listdir(landing_zone)
+            if os.path.isfile(os.path.join(landing_zone, name))
+        ]
         files.sort(key=lambda name: os.path.getctime(os.path.join(landing_zone, name)))
         for idx, name in enumerate(files, start=1):
             src = os.path.join(landing_zone, name)
@@ -220,19 +224,16 @@ class ActionaRunner:
         landing_zone_cfg = self.config.get("landing_zone", "")
         landing_zone = self.get_sys_path(landing_zone_cfg)
         flags_dir = self.get_sys_path(os.path.join("_system", "flags"))
-        if output_dir:
-            completed_dir = output_dir
-        else:
-            completed_dir = self.get_sys_path(os.path.join("03_review_room"))
-        image_script = os.path.join(
-            os.sep,
-            "home",
-            "worker001",
-            "RenderFleet",
-            "_system",
-            "scripts",
-            "higgsfield_image.ascr",
+        completed_dir = (
+            output_dir
+            if output_dir
+            else self.get_sys_path(os.path.join("03_review_room"))
         )
+        image_script_cfg = (
+            self.config.get("scripts", {}).get("img_gen")
+            or os.path.join("_system", "scripts", "higgsfield_image.ascr")
+        )
+        image_script = self.get_sys_path(image_script_cfg)
         env = self._build_env()
         sensitive_retry_used = False
         max_attempts = 2
@@ -245,7 +246,7 @@ class ActionaRunner:
             last_image_time = None
             seen_files = set()
 
-            cmd = ["actexec", "-e", image_script]
+            cmd = ["actexec", image_script]
             if arguments:
                 cmd.append(arguments)
             try:
@@ -298,7 +299,7 @@ class ActionaRunner:
                 if proc.poll() is not None:
                     break
 
-                time.sleep(2)
+                time.sleep(10)
 
             if retry_reason is None:
                 post_flag_action = self._check_flags(flags_dir, sensitive_retry_used)
@@ -320,7 +321,7 @@ class ActionaRunner:
                     continue
                 return False
             if retry_reason == "skip":
-                return "skipped"
+                return False
             return True
 
         return False
@@ -357,29 +358,18 @@ class ActionaRunner:
                     pass
 
         env = self._build_env()
-        if config.get("scripts", {}).get("dry_run", True):
-            msg = f"[DRY RUN] Executing: actexec -e {script_path} {arguments}"
-            if prompt_text is not None:
-                msg = f"{msg} | prompt: {prompt_text}"
-            print(msg)
-            for i in range(num_outputs):
-                rand = random.randint(1, 99999)
-                fname = (
-                    f"random_{rand}{output_ext}"
-                    if i % 2 == 0
-                    else f"temp_{rand}{output_ext}"
-                )
-                fpath = os.path.join(landing_zone, fname)
-                open(fpath, "w").close()
-                time.sleep(0.1)
-        else:
-            try:
-                cmd = ["actexec", "-e", script_path]
-                if arguments:
-                    cmd.append(arguments)
-                subprocess.run(cmd, check=False, env=env)
-            except OSError:
-                return False
+        try:
+            resolved_script_path = (
+                script_path
+                if os.path.isabs(script_path)
+                else self.get_sys_path(script_path)
+            )
+            cmd = ["actexec", "-e", resolved_script_path]
+            if arguments:
+                cmd.append(arguments)
+            subprocess.run(cmd, check=False, env=env)
+        except OSError:
+            return False
 
         if not output_dir or not job_name:
             return False
