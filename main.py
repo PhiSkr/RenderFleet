@@ -640,6 +640,22 @@ def process_command_file(file_path, config):
     action = data.get("action")
     if action == "yield":
         return
+
+    def update_local_config(updates):
+        local_config_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+        )
+        try:
+            with open(local_config_path, "r", encoding="utf-8") as f:
+                cfg_on_disk = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg_on_disk = {}
+        cfg_on_disk.update(updates)
+        try:
+            with open(local_config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_on_disk, f, indent=4)
+        except OSError:
+            pass
     new_role = None
     if "role" in data:
         new_role = data.get("role")
@@ -647,65 +663,27 @@ def process_command_file(file_path, config):
         new_role = data.get("role") or data.get("value")
     if new_role:
         config["initial_role"] = new_role
-        local_config_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+        update_local_config(
+            {"worker_id": config.get("worker_id"), "initial_role": new_role}
         )
-        try:
-            with open(local_config_path, "r", encoding="utf-8") as f:
-                cfg_on_disk = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            cfg_on_disk = {}
-        cfg_on_disk["worker_id"] = config.get("worker_id")
-        cfg_on_disk["initial_role"] = new_role
-        try:
-            with open(local_config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg_on_disk, f, indent=4)
-        except OSError:
-            pass
         print(f"🔄 ROLE CHANGED: Now acting as {new_role}")
     if action == "stop":
-        print("🛑 STOPPING...")
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-        sys.exit(0)
-    if action == "pause":
+        print("🛑 PAUSING (Stop requested)...")
         config["paused"] = True
-        local_config_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
-        )
-        try:
-            with open(local_config_path, "r", encoding="utf-8") as f:
-                cfg_on_disk = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            cfg_on_disk = {}
-        cfg_on_disk["paused"] = True
-        try:
-            with open(local_config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg_on_disk, f, indent=4)
-        except OSError:
-            pass
+        update_local_config({"paused": True})
+    elif action == "pause":
+        config["paused"] = True
+        update_local_config({"paused": True})
     elif action == "unpause":
         config["paused"] = False
-        local_config_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
-        )
-        try:
-            with open(local_config_path, "r", encoding="utf-8") as f:
-                cfg_on_disk = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            cfg_on_disk = {}
-        cfg_on_disk["paused"] = False
-        try:
-            with open(local_config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg_on_disk, f, indent=4)
-        except OSError:
-            pass
+        update_local_config({"paused": False})
     try:
         os.remove(file_path)
     except OSError:
         pass
+    send_heartbeat(
+        config, status="PAUSED" if config.get("paused") else "IDLE"
+    )
 
 
 class RenderFleetHandler(FileSystemEventHandler):
@@ -733,6 +711,8 @@ def check_commands(config):
     try:
         with open(cmd_path, "r", encoding="utf-8") as f:
             cmd_data = json.load(f)
+    except FileNotFoundError:
+        return False
     except (OSError, json.JSONDecodeError):
         return False
 
