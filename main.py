@@ -533,8 +533,7 @@ def load_fleet_settings(config):
         return
     if "weights" in settings:
         config["weights"] = settings["weights"]
-    if "paused" in settings:
-        config["paused"] = settings["paused"]
+    config["fleet_paused"] = settings.get("paused", False)
 
 
 def dispatcher_loop(config):
@@ -595,8 +594,36 @@ def process_command_file(file_path, config):
         sys.exit(0)
     if action == "pause":
         config["paused"] = True
+        local_config_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+        )
+        try:
+            with open(local_config_path, "r", encoding="utf-8") as f:
+                cfg_on_disk = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg_on_disk = {}
+        cfg_on_disk["paused"] = True
+        try:
+            with open(local_config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_on_disk, f, indent=4)
+        except OSError:
+            pass
     elif action == "unpause":
         config["paused"] = False
+        local_config_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+        )
+        try:
+            with open(local_config_path, "r", encoding="utf-8") as f:
+                cfg_on_disk = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            cfg_on_disk = {}
+        cfg_on_disk["paused"] = False
+        try:
+            with open(local_config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_on_disk, f, indent=4)
+        except OSError:
+            pass
     try:
         os.remove(file_path)
     except OSError:
@@ -637,42 +664,51 @@ def check_commands(config):
             new_role = cmd_data.get("value", "")
             if new_role:
                 config["initial_role"] = new_role
+                local_config_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+                )
                 try:
-                    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    with open(local_config_path, "r", encoding="utf-8") as f:
                         cfg_on_disk = json.load(f)
                 except (OSError, json.JSONDecodeError):
                     cfg_on_disk = {}
                 cfg_on_disk["initial_role"] = new_role
                 try:
-                    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    with open(local_config_path, "w", encoding="utf-8") as f:
                         json.dump(cfg_on_disk, f, indent=4)
                 except OSError:
                     pass
                 print(f"⚙️ ROLE CHANGED to {new_role}")
         elif action == "stop":
             config["paused"] = True
+            local_config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+            )
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                with open(local_config_path, "r", encoding="utf-8") as f:
                     cfg_on_disk = json.load(f)
             except (OSError, json.JSONDecodeError):
                 cfg_on_disk = {}
             cfg_on_disk["paused"] = True
             try:
-                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                with open(local_config_path, "w", encoding="utf-8") as f:
                     json.dump(cfg_on_disk, f, indent=4)
             except OSError:
                 pass
             print("🛑 PAUSED Work.")
         elif action == "start":
             config["paused"] = False
+            local_config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "local_config.json"
+            )
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                with open(local_config_path, "r", encoding="utf-8") as f:
                     cfg_on_disk = json.load(f)
             except (OSError, json.JSONDecodeError):
                 cfg_on_disk = {}
             cfg_on_disk["paused"] = False
             try:
-                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                with open(local_config_path, "w", encoding="utf-8") as f:
                     json.dump(cfg_on_disk, f, indent=4)
             except OSError:
                 pass
@@ -1014,7 +1050,7 @@ def main():
         while True:
             check_commands(CONFIG)
             load_fleet_settings(CONFIG)
-            if CONFIG.get("paused"):
+            if CONFIG.get("paused", False) or CONFIG.get("fleet_paused", False):
                 send_heartbeat(CONFIG, status="PAUSED")
                 time.sleep(2)
                 continue
