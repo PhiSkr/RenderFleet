@@ -667,23 +667,20 @@ def process_command_file(file_path, config):
             {"worker_id": config.get("worker_id"), "initial_role": new_role}
         )
         print(f"🔄 ROLE CHANGED: Now acting as {new_role}")
-    if action == "stop":
-        print("🛑 PAUSING (Stop requested)...")
+    if action in ["pause", "stop"]:
         config["paused"] = True
         update_local_config({"paused": True})
-    elif action == "pause":
-        config["paused"] = True
-        update_local_config({"paused": True})
-    elif action == "unpause":
+        print(f"🛑 PAUSING (Action: {action})...")
+        send_heartbeat(config, status="PAUSED")
+    elif action in ["unpause", "start"]:
         config["paused"] = False
         update_local_config({"paused": False})
+        print(f"▶️ RESUMING (Action: {action})...")
+        send_heartbeat(config, status="IDLE")
     try:
         os.remove(file_path)
     except OSError:
         pass
-    send_heartbeat(
-        config, status="PAUSED" if config.get("paused") else "IDLE"
-    )
 
 
 class RenderFleetHandler(FileSystemEventHandler):
