@@ -279,7 +279,6 @@ class ActionaRunner:
         watch_images=True,
         heartbeat_callback=None,
     ):
-        STARTUP_TIMEOUT = 5 * 60
         start_time = time.time()
         first_output_time = None
         last_output_time = None
@@ -310,10 +309,6 @@ class ActionaRunner:
             if heartbeat_callback:
                 heartbeat_callback()
             now = time.time()
-            if first_output_time is None and now - start_time > STARTUP_TIMEOUT:
-                self._terminate_process(proc)
-                retry_reason = "startup_timeout"
-                break
             if watch_images:
                 current_files = self._list_image_files(landing_zone)
                 for name in current_files:
@@ -434,22 +429,23 @@ class ActionaRunner:
 
             if result.get("start_failed"):
                 return False
-            if result.get("retry_reason") in {"global_timeout", "startup_timeout"}:
+            if result.get("retry_reason") == "global_timeout":
                 self._run_refresh(env)
                 if attempt < max_attempts:
                     continue
                 return False
 
-            flag_action = self._consume_flags(flags_dir)
-            if flag_action == "retry_refresh":
-                self._run_refresh(env)
-                if attempt < max_attempts:
-                    continue
-                return False
-            if flag_action == "retry_sensitive":
-                if attempt < max_attempts:
-                    continue
-                return False
+            if not result.get("partial_success"):
+                flag_action = self._consume_flags(flags_dir)
+                if flag_action == "retry_refresh":
+                    self._run_refresh(env)
+                    if attempt < max_attempts:
+                        continue
+                    return False
+                if flag_action == "retry_sensitive":
+                    if attempt < max_attempts:
+                        continue
+                    return False
 
             if (
                 not result.get("partial_success")
