@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import threading
+import tempfile
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from dispatcher import FleetDispatcher
@@ -278,28 +279,41 @@ class ActionaRunner:
         watch_images=True,
         heartbeat_callback=None,
     ):
+        STARTUP_TIMEOUT = 5 * 60
         start_time = time.time()
         first_output_time = None
         last_output_time = None
         seen_files = set()
         partial_success = False
+        retry_reason = None
+        stdout_file = None
+        stderr_file = None
 
         try:
             print(f"[DEBUG] Executing: {' '.join(cmd)}")
+            stdout_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+            stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
             proc = subprocess.Popen(
                 cmd,
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                stdout=stdout_file,
+                stderr=stderr_file,
             )
         except OSError:
+            if stdout_file:
+                stdout_file.close()
+            if stderr_file:
+                stderr_file.close()
             return {"start_failed": True}
 
         while True:
             if heartbeat_callback:
                 heartbeat_callback()
             now = time.time()
+            if first_output_time is None and now - start_time > STARTUP_TIMEOUT:
+                self._terminate_process(proc)
+                retry_reason = "startup_timeout"
+                break
             if watch_images:
                 current_files = self._list_image_files(landing_zone)
                 for name in current_files:
@@ -320,7 +334,8 @@ class ActionaRunner:
 
             if now - start_time > self.GLOBAL_TIMEOUT_SECONDS:
                 self._terminate_process(proc)
-                return {"retry_reason": "global_timeout"}
+                retry_reason = "global_timeout"
+                break
 
             if proc.poll() is not None:
                 break
@@ -329,21 +344,32 @@ class ActionaRunner:
 
         stdout_data = ""
         stderr_data = ""
-        if proc.poll() is not None:
+        if proc.poll() is None:
             try:
-                stdout_data, stderr_data = proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._terminate_process(proc)
-                try:
-                    stdout_data, stderr_data = proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
+        try:
+            stdout_file.seek(0)
+            stdout_data = stdout_file.read()
+        except OSError:
+            stdout_data = ""
+        try:
+            stderr_file.seek(0)
+            stderr_data = stderr_file.read()
+        except OSError:
+            stderr_data = ""
+        if stdout_file:
+            stdout_file.close()
+        if stderr_file:
+            stderr_file.close()
 
         return {
             "partial_success": partial_success,
             "returncode": proc.returncode,
             "stdout": stdout_data,
             "stderr": stderr_data,
+            "retry_reason": retry_reason,
         }
 
     def run(
@@ -408,7 +434,7 @@ class ActionaRunner:
 
             if result.get("start_failed"):
                 return False
-            if result.get("retry_reason") == "global_timeout":
+            if result.get("retry_reason") in {"global_timeout", "startup_timeout"}:
                 self._run_refresh(env)
                 if attempt < max_attempts:
                     continue
@@ -836,7 +862,12 @@ def process_jobs(config):
         if not os.path.exists(job_path):
             print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
             return False
-        shutil.move(job_path, os.path.join(target_dir, filename))
+        try:
+            shutil.move(job_path, os.path.join(target_dir, filename))
+        except OSError as e:
+            log_activity(f"❌ ERROR: Failed to move finished job: {e}")
+            print(f"❌ ERROR: Failed to move finished job: {e}")
+            return True
         print(f"✅ Job finished: {filename}")
         log_activity(f"✅ Job finished: {filename}")
         return True
@@ -932,7 +963,12 @@ def process_jobs(config):
         if not os.path.exists(job_path):
             print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
             return False
-        shutil.move(job_path, os.path.join(archive_path, filename))
+        try:
+            shutil.move(job_path, os.path.join(archive_path, filename))
+        except OSError as e:
+            log_activity(f"❌ ERROR: Failed to move finished job: {e}")
+            print(f"❌ ERROR: Failed to move finished job: {e}")
+            return True
         print(f"✅ Video Job finished: {filename}")
         log_activity(f"✅ Job finished: {filename}")
         return True
