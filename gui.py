@@ -12,6 +12,107 @@ ctk.set_default_color_theme("dark-blue")
 
 class WorkerCard(ctk.CTkFrame):
     def __init__(self, master, worker_data, is_online):
+        status_text, border_color = self._derive_status(worker_data, is_online)
+
+        super().__init__(master, fg_color="#1f1f1f", border_width=2, border_color=border_color, corner_radius=10)
+
+        worker_id = worker_data.get("worker_id", "Unknown")
+        role = worker_data.get("role", "Unknown")
+        current_job = worker_data.get("current_job", "None")
+        last_seen = worker_data.get("last_seen", "Unknown")
+
+        self.worker_id = worker_id
+
+        self.title_label = ctk.CTkLabel(self, text=f"Worker ID: {worker_id}", font=("Helvetica", 16, "bold"))
+        self.title_label.pack(anchor="w", padx=12, pady=(10, 2))
+
+        self.status_label = ctk.CTkLabel(self, text=f"Status: {status_text}")
+        self.status_label.pack(anchor="w", padx=12)
+
+        self.role_label = ctk.CTkLabel(self, text=f"Role: {role}")
+        self.role_label.pack(anchor="w", padx=12)
+
+        self.job_label = ctk.CTkLabel(self, text=f"Current Job: {current_job}")
+        self.job_label.pack(anchor="w", padx=12)
+
+        self.last_seen_label = ctk.CTkLabel(self, text=f"Last Seen: {last_seen}")
+        self.last_seen_label.pack(anchor="w", padx=12, pady=(0, 6))
+
+        time_diff = worker_data.get("time_diff", 0)
+        btn_state = "normal" if is_online and time_diff <= 90 else "disabled"
+
+        power_row = ctk.CTkFrame(self, fg_color="transparent")
+        power_row.pack(fill="x", padx=12, pady=(0, 6))
+
+        self.start_btn = ctk.CTkButton(
+            power_row,
+            text="▶️ START",
+            width=110,
+            height=26,
+            fg_color="green",
+            command=lambda: self.send_command(worker_id, "unpause"),
+            state=btn_state,
+        )
+        self.start_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
+
+        self.stop_btn = ctk.CTkButton(
+            power_row,
+            text="⏸ STOP",
+            width=110,
+            height=26,
+            fg_color="red",
+            command=lambda: self.send_command(worker_id, "pause"),
+            state=btn_state,
+        )
+        self.stop_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+        button_row = ctk.CTkFrame(self, fg_color="transparent")
+        button_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        self.img_btn = ctk.CTkButton(
+            button_row,
+            text="Set: ImgLead",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "set_role", "img_lead"),
+            state=btn_state,
+        )
+        self.img_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
+
+        self.vid_btn = ctk.CTkButton(
+            button_row,
+            text="Set: VidLead",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "set_role", "vid_lead"),
+            state=btn_state,
+        )
+        self.vid_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+        self.img_worker_btn = ctk.CTkButton(
+            button_row,
+            text="Set: ImgWork",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "set_role", "img_worker"),
+            state=btn_state,
+        )
+        self.img_worker_btn.grid(row=1, column=0, padx=4, pady=4, sticky="w")
+
+        self.vid_worker_btn = ctk.CTkButton(
+            button_row,
+            text="Set: VidWork",
+            width=110,
+            height=26,
+            command=lambda: self.send_command(worker_id, "set_role", "vid_worker"),
+            state=btn_state,
+        )
+        self.vid_worker_btn.grid(row=1, column=1, padx=4, pady=4, sticky="w")
+
+        self.feedback_label = ctk.CTkLabel(self, text="", text_color="#2ecc71")
+        self.feedback_label.pack(anchor="w", padx=12, pady=(0, 10))
+
+    def _derive_status(self, worker_data, is_online):
         status = worker_data.get("status", "Unknown")
         time_diff = worker_data.get("time_diff", 0)
 
@@ -25,100 +126,28 @@ class WorkerCard(ctk.CTkFrame):
                 border_color = "#2ecc71"  # green
             status_text = status
 
-        super().__init__(master, fg_color="#1f1f1f", border_width=2, border_color=border_color, corner_radius=10)
+        return status_text, border_color
 
-        worker_id = worker_data.get("worker_id", "Unknown")
+    def update_state(self, worker_data, is_online):
+        status_text, border_color = self._derive_status(worker_data, is_online)
         role = worker_data.get("role", "Unknown")
         current_job = worker_data.get("current_job", "None")
         last_seen = worker_data.get("last_seen", "Unknown")
+        time_diff = worker_data.get("time_diff", 0)
 
-        title = ctk.CTkLabel(self, text=f"Worker ID: {worker_id}", font=("Helvetica", 16, "bold"))
-        title.pack(anchor="w", padx=12, pady=(10, 2))
-
-        status_label = ctk.CTkLabel(self, text=f"Status: {status_text}")
-        status_label.pack(anchor="w", padx=12)
-
-        role_label = ctk.CTkLabel(self, text=f"Role: {role}")
-        role_label.pack(anchor="w", padx=12)
-
-        job_label = ctk.CTkLabel(self, text=f"Current Job: {current_job}")
-        job_label.pack(anchor="w", padx=12)
-
-        last_seen_label = ctk.CTkLabel(self, text=f"Last Seen: {last_seen}")
-        last_seen_label.pack(anchor="w", padx=12, pady=(0, 6))
+        self.status_label.configure(text=f"Status: {status_text}")
+        self.role_label.configure(text=f"Role: {role}")
+        self.job_label.configure(text=f"Current Job: {current_job}")
+        self.last_seen_label.configure(text=f"Last Seen: {last_seen}")
+        self.configure(border_color=border_color)
 
         btn_state = "normal" if is_online and time_diff <= 90 else "disabled"
-
-        power_row = ctk.CTkFrame(self, fg_color="transparent")
-        power_row.pack(fill="x", padx=12, pady=(0, 6))
-
-        start_btn = ctk.CTkButton(
-            power_row,
-            text="▶️ START",
-            width=110,
-            height=26,
-            fg_color="green",
-            command=lambda: self.send_command(worker_id, "unpause"),
-            state=btn_state,
-        )
-        start_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
-
-        stop_btn = ctk.CTkButton(
-            power_row,
-            text="⏸ STOP",
-            width=110,
-            height=26,
-            fg_color="red",
-            command=lambda: self.send_command(worker_id, "pause"),
-            state=btn_state,
-        )
-        stop_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
-
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(fill="x", padx=12, pady=(0, 8))
-
-        img_btn = ctk.CTkButton(
-            button_row,
-            text="Set: ImgLead",
-            width=110,
-            height=26,
-            command=lambda: self.send_command(worker_id, "set_role", "img_lead"),
-            state=btn_state,
-        )
-        img_btn.grid(row=0, column=0, padx=4, pady=4, sticky="w")
-
-        vid_btn = ctk.CTkButton(
-            button_row,
-            text="Set: VidLead",
-            width=110,
-            height=26,
-            command=lambda: self.send_command(worker_id, "set_role", "vid_lead"),
-            state=btn_state,
-        )
-        vid_btn.grid(row=0, column=1, padx=4, pady=4, sticky="w")
-
-        img_worker_btn = ctk.CTkButton(
-            button_row,
-            text="Set: ImgWork",
-            width=110,
-            height=26,
-            command=lambda: self.send_command(worker_id, "set_role", "img_worker"),
-            state=btn_state,
-        )
-        img_worker_btn.grid(row=1, column=0, padx=4, pady=4, sticky="w")
-
-        vid_worker_btn = ctk.CTkButton(
-            button_row,
-            text="Set: VidWork",
-            width=110,
-            height=26,
-            command=lambda: self.send_command(worker_id, "set_role", "vid_worker"),
-            state=btn_state,
-        )
-        vid_worker_btn.grid(row=1, column=1, padx=4, pady=4, sticky="w")
-
-        self.feedback_label = ctk.CTkLabel(self, text="", text_color="#2ecc71")
-        self.feedback_label.pack(anchor="w", padx=12, pady=(0, 10))
+        self.start_btn.configure(state=btn_state)
+        self.stop_btn.configure(state=btn_state)
+        self.img_btn.configure(state=btn_state)
+        self.vid_btn.configure(state=btn_state)
+        self.img_worker_btn.configure(state=btn_state)
+        self.vid_worker_btn.configure(state=btn_state)
 
     def send_command(self, worker_id, action, value=None):
         if not worker_id:
@@ -169,6 +198,8 @@ class RenderFleetApp(ctk.CTk):
 
         self.monitor_frame = ctk.CTkScrollableFrame(self.monitor_tab, fg_color="#151515")
         self.monitor_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.worker_cards = {}
+        self.empty_label = None
 
         self._build_image_factory()
         self._build_video_factory()
@@ -690,32 +721,50 @@ class RenderFleetApp(ctk.CTk):
         heartbeat_dir = os.path.join(self.syncthing_root, "_system", "heartbeats")
         heartbeat_files = glob.glob(os.path.join(heartbeat_dir, "*.json"))
         current_time = time.time()
+        seen_ids = set()
 
-        for widget in self.monitor_frame.winfo_children():
-            widget.destroy()
+        for hb_path in heartbeat_files:
+            try:
+                with open(hb_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
 
-        if not heartbeat_files:
-            empty = ctk.CTkLabel(self.monitor_frame, text="No workers found.")
-            empty.pack(padx=12, pady=12, anchor="w")
-        else:
-            for hb_path in heartbeat_files:
-                try:
-                    with open(hb_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+                worker_id = data.get("worker_id")
+                if not worker_id:
+                    continue
 
-                    heartbeat_timestamp = data.get("timestamp", 0)
-                    time_diff = current_time - heartbeat_timestamp
+                heartbeat_timestamp = data.get("timestamp", 0)
+                time_diff = current_time - heartbeat_timestamp
 
-                    last_seen = f"{int(time_diff)}s ago"
-                    data["time_diff"] = time_diff
-                    data["last_seen"] = last_seen
+                last_seen = f"{int(time_diff)}s ago"
+                data["time_diff"] = time_diff
+                data["last_seen"] = last_seen
 
-                    is_online = time_diff <= 90
+                is_online = time_diff <= 90
 
+                if worker_id in self.worker_cards:
+                    self.worker_cards[worker_id].update_state(data, is_online)
+                else:
                     card = WorkerCard(self.monitor_frame, data, is_online)
                     card.pack(fill="x", padx=12, pady=8)
-                except (OSError, json.JSONDecodeError):
-                    continue
+                    self.worker_cards[worker_id] = card
+
+                seen_ids.add(worker_id)
+            except (OSError, json.JSONDecodeError):
+                continue
+
+        for worker_id in list(self.worker_cards.keys()):
+            if worker_id not in seen_ids:
+                self.worker_cards[worker_id].destroy()
+                del self.worker_cards[worker_id]
+
+        if not self.worker_cards:
+            if not self.empty_label:
+                self.empty_label = ctk.CTkLabel(self.monitor_frame, text="No workers found.")
+                self.empty_label.pack(padx=12, pady=12, anchor="w")
+        else:
+            if self.empty_label:
+                self.empty_label.destroy()
+                self.empty_label = None
 
         self.after(2000, self.refresh_fleet)
 

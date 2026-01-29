@@ -734,7 +734,7 @@ def check_commands(config):
                 except OSError:
                     pass
                 print(f"⚙️ ROLE CHANGED to {new_role}")
-        elif action == "stop":
+        elif action in ("stop", "pause"):
             config["paused"] = True
             local_config_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "local_config.json"
@@ -751,7 +751,7 @@ def check_commands(config):
             except OSError:
                 pass
             print("🛑 PAUSED Work.")
-        elif action == "start":
+        elif action in ("start", "unpause"):
             config["paused"] = False
             local_config_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "local_config.json"
