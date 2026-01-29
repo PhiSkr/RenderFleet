@@ -75,6 +75,10 @@ def load_config():
 
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
+    if not config["scripts"].get("vid_gen"):
+        config["scripts"]["vid_gen"] = os.path.join(
+            "_system", "scripts", "RunwayVideo.ascr"
+        )
 
     settings_path = os.path.join(root, "_system", "settings.json")
     try:
@@ -173,6 +177,16 @@ class ActionaRunner:
             except OSError:
                 pass
 
+    def _list_files(self, landing_zone):
+        files = []
+        try:
+            for entry in os.listdir(landing_zone):
+                if os.path.isfile(os.path.join(landing_zone, entry)):
+                    files.append(entry)
+        except OSError:
+            files = []
+        return files
+
     def _list_image_files(self, landing_zone):
         image_exts = {".png", ".jpg", ".jpeg"}
         files = []
@@ -245,12 +259,22 @@ class ActionaRunner:
         image_open_fail = os.path.join(flags_dir, "ImageOpenFail.txt")
         no_hotbar = os.path.join(flags_dir, "NOHOTBAR.txt")
         sensitive = os.path.join(flags_dir, "SENSITIVE.txt")
+        issue_flag = os.path.join(flags_dir, "issue.txt")
+        prompt_violation = os.path.join(flags_dir, "PromptViolation.txt")
 
         has_image_open_fail = os.path.exists(image_open_fail)
         has_no_hotbar = os.path.exists(no_hotbar)
         has_sensitive = os.path.exists(sensitive)
+        has_issue_flag = os.path.exists(issue_flag)
+        has_prompt_violation = os.path.exists(prompt_violation)
 
-        for path in (image_open_fail, no_hotbar, sensitive):
+        for path in (
+            image_open_fail,
+            no_hotbar,
+            sensitive,
+            issue_flag,
+            prompt_violation,
+        ):
             if os.path.exists(path):
                 try:
                     os.remove(path)
@@ -261,6 +285,8 @@ class ActionaRunner:
             return "retry_refresh"
         if has_sensitive:
             return "retry_sensitive"
+        if has_issue_flag or has_prompt_violation:
+            return "conditional_retry"
 
         return None
 
@@ -278,6 +304,7 @@ class ActionaRunner:
         landing_zone,
         watch_images=True,
         heartbeat_callback=None,
+        global_timeout_seconds=None,
     ):
         start_time = time.time()
         first_output_time = None
@@ -287,6 +314,11 @@ class ActionaRunner:
         retry_reason = None
         stdout_file = None
         stderr_file = None
+        timeout_val = (
+            global_timeout_seconds
+            if global_timeout_seconds is not None
+            else self.GLOBAL_TIMEOUT_SECONDS
+        )
 
         try:
             print(f"[DEBUG] Executing: {' '.join(cmd)}")
@@ -327,7 +359,7 @@ class ActionaRunner:
                     partial_success = True
                     break
 
-            if now - start_time > self.GLOBAL_TIMEOUT_SECONDS:
+            if now - start_time > timeout_val:
                 self._terminate_process(proc)
                 retry_reason = "global_timeout"
                 break
@@ -378,6 +410,7 @@ class ActionaRunner:
         prompt_text=None,
         is_image=False,
         heartbeat_callback=None,
+        global_timeout=None,
     ):
         landing_zone_cfg = self.config.get("landing_zone", "")
         landing_zone = self.get_sys_path(landing_zone_cfg)
@@ -396,6 +429,11 @@ class ActionaRunner:
         max_attempts = 2
         watch_images = is_image or (
             output_ext and output_ext.lower() in {".png", ".jpg", ".jpeg"}
+        )
+        timeout_val = (
+            global_timeout
+            if global_timeout is not None
+            else self.GLOBAL_TIMEOUT_SECONDS
         )
 
         for attempt in range(1, max_attempts + 1):
@@ -425,6 +463,7 @@ class ActionaRunner:
                 landing_zone,
                 watch_images=watch_images,
                 heartbeat_callback=heartbeat_callback,
+                global_timeout_seconds=timeout_val,
             )
 
             if result.get("start_failed"):
@@ -446,6 +485,23 @@ class ActionaRunner:
                     if attempt < max_attempts:
                         continue
                     return False
+                if flag_action == "conditional_retry":
+                    current_files = self._list_files(landing_zone)
+                    if output_ext:
+                        current_files = [
+                            f
+                            for f in current_files
+                            if f.lower().endswith(output_ext.lower())
+                        ]
+                    if current_files:
+                        print(
+                            "⚠️ Flag detected but output exists. Accepting partial success."
+                        )
+                    else:
+                        print("❌ Flag detected and no output. Retrying...")
+                        if attempt < max_attempts:
+                            continue
+                        return False
 
             if (
                 not result.get("partial_success")
@@ -927,6 +983,7 @@ def process_jobs(config):
                 num_outputs=2,
                 prompt_text=prompt_text,
                 heartbeat_callback=hb_callback,
+                global_timeout=45 * 60,
             )
             if success:
                 completed.append(image_name)
