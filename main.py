@@ -379,7 +379,7 @@ class ActionaRunner:
         )
 
         try:
-            print(f"[DEBUG] Executing: {' '.join(cmd)}")
+            print(f"DEBUG: Executing: {' '.join(cmd)}")
             stdout_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
             stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
             proc = subprocess.Popen(
