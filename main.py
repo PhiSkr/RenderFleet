@@ -540,6 +540,7 @@ class ActionaRunner:
             os.makedirs(staging_prompts, exist_ok=True)
             prompt_path = os.path.join(staging_prompts, "current_prompt.txt")
             prompt_text = "" if arguments is None else str(arguments)
+            print(f"📄 Writing prompt to current_prompt.txt: '{prompt_text}'")
             try:
                 with open(prompt_path, "w", encoding="utf-8") as f:
                     f.write(prompt_text)
@@ -627,6 +628,11 @@ class ActionaRunner:
             ]
             if output_ext:
                 files = [f for f in files if f.lower().endswith(output_ext)]
+            if not files:
+                print("❌ Actiona finished but NO videos were produced")
+                if attempt < max_attempts:
+                    continue
+                return False
             files.sort(key=os.path.getctime)
 
             for idx, src in enumerate(files[:num_outputs], start=1):
@@ -1063,6 +1069,13 @@ def process_jobs(config):
                 global_timeout=45 * 60,
             )
             if success == "aborted":
+                print("🛑 Video job aborted. Returning job to queue.")
+                vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
+                os.makedirs(vid_queue, exist_ok=True)
+                try:
+                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                except OSError:
+                    pass
                 return True
             if success:
                 completed.append(image_name)
@@ -1079,6 +1092,14 @@ def process_jobs(config):
                     log_activity(f"❌ ERROR: writing progress.json failed: {e}")
             else:
                 log_activity(f"❌ ERROR: Video generation failed: {image_name}")
+                print("🛑 Video job failed. Returning job to queue.")
+                vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
+                os.makedirs(vid_queue, exist_ok=True)
+                try:
+                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                except OSError:
+                    pass
+                return True
             print(f"DEBUG: Checking for preemption commands for {config.get('worker_id')}...")
             if check_yield_command(config):
                 print("🛑 Preemption requested. Yielding job...")
