@@ -168,15 +168,18 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 CONFIG = load_config()
 print(f"DEBUG: Config in Memory: {CONFIG}")
 print(f"DEBUG: Heartbeat Path value: '{CONFIG.get('heartbeat_path')}'")
+print(
+    f"DEBUG: syncthing_root (absolute): "
+    f"'{os.path.abspath(os.path.expanduser(CONFIG.get('syncthing_root') or '~/RenderFleet'))}'"
+)
 
 
 def get_sys_path(subpath):
-    subpath = os.path.expanduser(subpath)
-    root = CONFIG.get("syncthing_root")
-    if not root:
-        root = os.path.expanduser("~/RenderFleet")
-        print("⚠️ WARNING: syncthing_root missing in config, using default ~/RenderFleet")
+    root = CONFIG.get("syncthing_root") or "~/RenderFleet"
     root = os.path.abspath(os.path.expanduser(root))
+    if not subpath:
+        return root
+    subpath = os.path.expanduser(subpath)
     if os.path.isabs(subpath):
         full_path = os.path.abspath(os.path.expanduser(subpath))
     else:
@@ -620,10 +623,7 @@ def send_heartbeat(config, status="IDLE", current_job=None):
         "current_job": current_job,
     }
 
-    hb_folder = config.get("heartbeat_path", "")
-    hb_folder = os.path.expanduser(hb_folder)
-    if not os.path.isabs(hb_folder):
-        hb_folder = os.path.abspath(hb_folder)
+    hb_folder = get_sys_path(config.get("heartbeat_path", ""))
     os.makedirs(hb_folder, exist_ok=True)
     hb_path = os.path.join(hb_folder, f"{heartbeat['worker_id']}.json")
     print(f"DEBUG: Writing Heartbeat to: '{hb_path}'")
@@ -638,11 +638,9 @@ def check_yield_command(config):
     worker_id = config.get("worker_id")
     if not worker_id:
         return False
-    cmd_root = config.get("command_path")
-    if cmd_root:
-        cmd_root = os.path.abspath(os.path.expanduser(cmd_root))
-    else:
-        cmd_root = get_sys_path(os.path.join("_system", "commands"))
+    cmd_root = get_sys_path(
+        config.get("command_path") or os.path.join("_system", "commands")
+    )
     cmd_path = os.path.join(cmd_root, f"{worker_id}.cmd")
     if not os.path.exists(cmd_path):
         return False
@@ -1155,10 +1153,8 @@ def main():
     )
     dispatcher_thread.start()
     observer = Observer()
-    inbox = CONFIG["inbox_path"]
-    cmds = CONFIG["command_path"]
-    inbox = os.path.abspath(os.path.expanduser(inbox))
-    cmds = os.path.abspath(os.path.expanduser(cmds))
+    inbox = get_sys_path(CONFIG.get("inbox_path", ""))
+    cmds = get_sys_path(CONFIG.get("command_path", ""))
     os.makedirs(inbox, exist_ok=True)
     os.makedirs(cmds, exist_ok=True)
     observer.schedule(RenderFleetHandler(), inbox, recursive=False)
