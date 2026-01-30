@@ -742,6 +742,7 @@ def dispatcher_loop(config):
             img_queue = get_sys_path(os.path.join("01_job_factory", "img_queue"))
             active_floor = get_sys_path("02_active_floor")
             dispatcher.enforce_vip_preemption(img_queue, active_floor)
+            load_fleet_settings(config)
             dispatcher.dispatch_smart()
         time.sleep(15)
 
@@ -911,6 +912,9 @@ def process_jobs(config):
 
     job_path = None
     for entry in entries:
+        if entry.startswith("."):
+            print(f"DEBUG: Skipping system file: {entry}")
+            continue
         candidate = os.path.join(inbox_path, entry)
         if os.path.isfile(candidate) or os.path.isdir(candidate):
             job_path = candidate
@@ -1027,11 +1031,25 @@ def process_jobs(config):
         staging_prompts = get_sys_path(prompts_cfg)
         os.makedirs(staging_prompts, exist_ok=True)
 
-        images = [
-            f
-            for f in sorted(os.listdir(job_path))
-            if os.path.splitext(f)[1].lower() in {".png", ".jpg", ".jpeg"}
-        ]
+        images = []
+        try:
+            for name in sorted(os.listdir(job_path)):
+                if name.startswith("."):
+                    print(f"DEBUG: Skipping system file: {name}")
+                    continue
+                if os.path.splitext(name)[1].lower() in {".png", ".jpg", ".jpeg"}:
+                    images.append(name)
+        except OSError:
+            images = []
+        if not images:
+            error_path = get_sys_path("05_error")
+            os.makedirs(error_path, exist_ok=True)
+            dest = os.path.join(error_path, filename)
+            try:
+                shutil.move(job_path, dest)
+            except OSError:
+                pass
+            return True
         progress_path = os.path.join(job_path, "progress.json")
         completed = []
         try:
@@ -1315,6 +1333,7 @@ def main():
             time.sleep(0.5)
             if did_work:
                 continue
+            send_heartbeat(CONFIG, status="IDLE")
             time.sleep(5)
     except KeyboardInterrupt:
         print("\n🛑 Worker stopping...")

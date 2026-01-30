@@ -79,7 +79,7 @@ class FleetDispatcher:
                 except OSError:
                     continue
 
-    def _get_idle_workers(self, target_type=None, include_self_id=False):
+    def _get_idle_workers(self, target_type=None, include_self_id=False, local_worker_id=None):
         hb_dir = self.config.get("heartbeat_path")
         if hb_dir:
             hb_dir = os.path.abspath(os.path.expanduser(hb_dir))
@@ -124,7 +124,11 @@ class FleetDispatcher:
                     continue
                 idle_workers.append(worker_id)
 
-        if include_self_id:
+        if local_worker_id:
+            if local_worker_id in idle_workers:
+                idle_workers.remove(local_worker_id)
+            idle_workers.insert(0, local_worker_id)
+        elif include_self_id:
             self_id = self.config.get("worker_id")
             self_role = self.config.get("initial_role")
             self_status = self.config.get("last_status")
@@ -145,11 +149,12 @@ class FleetDispatcher:
     def get_next_job(self, queue_path, config_weights):
         self.logger(f"DEBUG: Scanning queue at {queue_path}")
         try:
-            entries = [
-                os.path.join(queue_path, f)
-                for f in os.listdir(queue_path)
-                if not f.startswith(".")
-            ]
+            entries = []
+            for name in os.listdir(queue_path):
+                if name.startswith("."):
+                    self.logger(f"DEBUG: Skipping system file: {name}")
+                    continue
+                entries.append(os.path.join(queue_path, name))
         except OSError as e:
             self.logger(f"DEBUG: Failed to list queue: {e}")
             entries = []
@@ -329,7 +334,9 @@ class FleetDispatcher:
         self.logger(f"DEBUG: Dispatching for role {role}, looking in {source_rel}")
         source_path = self.get_sys_path(source_rel)
         idle_workers = self._get_idle_workers(
-            target_type=target_type, include_self_id=True
+            target_type=target_type,
+            include_self_id=True,
+            local_worker_id=self.config.get("worker_id"),
         )
         self.logger(f"DEBUG: Found {len(idle_workers)} idle workers: {idle_workers}")
         if not idle_workers:
