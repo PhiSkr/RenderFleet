@@ -12,6 +12,34 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from dispatcher import FleetDispatcher
 
+DATA_ROOT = None
+
+
+def get_sys_path(subpath):
+    root = DATA_ROOT
+    if not root:
+        cfg = globals().get("CONFIG") or {}
+        root = cfg.get("syncthing_root") or "~/RenderFleet"
+    root = os.path.abspath(os.path.expanduser(root))
+    if not subpath:
+        return root
+    subpath = os.path.expanduser(subpath)
+    if os.path.isabs(subpath):
+        full_path = os.path.abspath(os.path.expanduser(subpath))
+    else:
+        full_path = os.path.abspath(os.path.join(root, subpath))
+    if full_path.startswith(BASE_DIR + os.sep) and (
+        os.path.exists(os.path.join(BASE_DIR, ".git"))
+        or os.path.exists(os.path.join(BASE_DIR, "main.py"))
+    ):
+        print(
+            "🚨 WARNING: Data path resolves inside code repo. "
+            f"Path='{full_path}' Root='{root}'"
+        )
+    if not os.path.exists(full_path):
+        print(f"DEBUG: Path resolution: '{subpath}' -> '{full_path}'")
+    return full_path
+
 
 def load_config():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,11 +79,20 @@ def load_config():
             replaced = False
             for marker in ("/RenderFleet/", "/RenderFleet_Code/"):
                 if marker in value:
-                    value = value.split(marker, 1)[1]
+                    remainder = value.split(marker, 1)[1]
+                    if root_path:
+                        value = os.path.join(
+                            os.path.abspath(os.path.expanduser(root_path)), remainder
+                        )
+                    else:
+                        value = remainder
                     replaced = True
                     break
             if not replaced and root_path:
-                value = os.path.relpath(os.path.abspath(value), os.path.abspath(root_path))
+                value = os.path.join(
+                    os.path.abspath(os.path.expanduser(root_path)),
+                    os.path.basename(value),
+                )
         if root_path:
             root_path = os.path.abspath(os.path.expanduser(root_path))
             if os.path.isabs(value) and os.path.abspath(value).startswith(root_path):
@@ -115,14 +152,17 @@ def load_config():
 
     root = config.get("syncthing_root") or "~/RenderFleet"
     root = os.path.abspath(os.path.expanduser(root))
+    config["syncthing_root"] = root
+    global DATA_ROOT
+    DATA_ROOT = root
     if "inbox_path" not in config:
-        config["inbox_path"] = os.path.join(root, "01_job_factory")
+        config["inbox_path"] = "01_job_factory"
     if "command_path" not in config:
-        config["command_path"] = os.path.join(root, "_system", "commands")
+        config["command_path"] = os.path.join("_system", "commands")
     if "heartbeat_path" not in config:
-        config["heartbeat_path"] = os.path.join(root, "_system", "heartbeats")
+        config["heartbeat_path"] = os.path.join("_system", "heartbeats")
     for key in ("inbox_path", "command_path", "heartbeat_path"):
-        config[key] = os.path.abspath(os.path.expanduser(config[key]))
+        config[key] = get_sys_path(config[key])
 
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
@@ -133,8 +173,12 @@ def load_config():
         )
 
     for key, value in list(config.items()):
+        if key in {"inbox_path", "command_path", "heartbeat_path"}:
+            continue
         if isinstance(value, str):
             config[key] = _normalize_path_string(value, root_path=root)
+    for key in ("inbox_path", "command_path", "heartbeat_path"):
+        config[key] = get_sys_path(config[key])
 
     settings_path = os.path.join(root, "_system", "settings.json")
     try:
@@ -172,21 +216,6 @@ print(
     f"DEBUG: syncthing_root (absolute): "
     f"'{os.path.abspath(os.path.expanduser(CONFIG.get('syncthing_root') or '~/RenderFleet'))}'"
 )
-
-
-def get_sys_path(subpath):
-    root = CONFIG.get("syncthing_root") or "~/RenderFleet"
-    root = os.path.abspath(os.path.expanduser(root))
-    if not subpath:
-        return root
-    subpath = os.path.expanduser(subpath)
-    if os.path.isabs(subpath):
-        full_path = os.path.abspath(os.path.expanduser(subpath))
-    else:
-        full_path = os.path.abspath(os.path.join(root, subpath))
-    if not os.path.exists(full_path):
-        print(f"DEBUG: Path resolution: '{subpath}' -> '{full_path}'")
-    return full_path
 
 
 def log_activity(msg):
@@ -396,14 +425,12 @@ class ActionaRunner:
             return {"start_failed": True}
 
         while True:
+            if CONFIG.get("paused") or CONFIG.get("fleet_paused"):
+                self._terminate_process(proc)
+                return {"aborted": True}
             if heartbeat_callback:
                 heartbeat_callback()
             now = time.time()
-            if CONFIG.get("paused") or CONFIG.get("fleet_paused"):
-                self._terminate_process(proc)
-                retry_reason = "paused"
-                aborted = True
-                break
             if watch_images:
                 current_files = self._list_image_files(landing_zone)
                 for name in current_files:
@@ -623,7 +650,7 @@ def send_heartbeat(config, status="IDLE", current_job=None):
         "current_job": current_job,
     }
 
-    hb_folder = get_sys_path(config.get("heartbeat_path", ""))
+    hb_folder = get_sys_path(os.path.join("_system", "heartbeats"))
     os.makedirs(hb_folder, exist_ok=True)
     hb_path = os.path.join(hb_folder, f"{heartbeat['worker_id']}.json")
     print(f"DEBUG: Writing Heartbeat to: '{hb_path}'")
