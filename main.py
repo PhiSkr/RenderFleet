@@ -416,6 +416,8 @@ class ActionaRunner:
                 env=env,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                cwd=get_sys_path(""),
+                shell=False,
             )
         except OSError:
             if stdout_file:
@@ -540,12 +542,17 @@ class ActionaRunner:
             os.makedirs(staging_prompts, exist_ok=True)
             prompt_path = os.path.join(staging_prompts, "current_prompt.txt")
             prompt_text = "" if arguments is None else str(arguments)
+            print(f"DEBUG: Full prompt path: {os.path.abspath(prompt_path)}")
             print(f"📄 Writing prompt to current_prompt.txt: '{prompt_text}'")
             try:
                 with open(prompt_path, "w", encoding="utf-8") as f:
                     f.write(prompt_text)
+                    f.flush()
+                    os.fsync(f.fileno())
             except OSError:
                 pass
+            if not os.path.exists(prompt_path):
+                print(f"❌ CRITICAL: Prompt file missing at {prompt_path}")
 
             cmd = ["actexec", script_path]
 
