@@ -43,7 +43,58 @@ def load_config():
         except OSError:
             pass
 
-    config.update(local_data)
+    def _normalize_path_string(path_value, root_path=None, force_relative=False):
+        if not isinstance(path_value, str) or not path_value:
+            return path_value
+        value = os.path.expanduser(path_value)
+        if value.startswith("/home/worker"):
+            replaced = False
+            for marker in ("/RenderFleet/", "/RenderFleet_Code/"):
+                if marker in value:
+                    value = value.split(marker, 1)[1]
+                    replaced = True
+                    break
+            if not replaced and root_path:
+                value = os.path.relpath(os.path.abspath(value), os.path.abspath(root_path))
+        if root_path:
+            root_path = os.path.abspath(os.path.expanduser(root_path))
+            if os.path.isabs(value) and os.path.abspath(value).startswith(root_path):
+                value = os.path.relpath(os.path.abspath(value), root_path)
+            elif force_relative and os.path.isabs(value):
+                value = os.path.relpath(os.path.abspath(value), root_path)
+        return value
+
+    def _normalize_scripts(scripts_cfg, root_path):
+        normalized = {}
+        for key, value in scripts_cfg.items():
+            if not isinstance(value, str):
+                normalized[key] = value
+                continue
+            if key == "vid_gen" and "dummy" in value.lower():
+                normalized[key] = os.path.join(
+                    "_system", "scripts", "RunwayVideo.ascr"
+                )
+                continue
+            normalized[key] = _normalize_path_string(
+                value, root_path=root_path, force_relative=True
+            )
+        return normalized
+
+    merged = dict(config)
+    if "scripts" in merged and isinstance(merged["scripts"], dict):
+        merged["scripts"] = dict(merged["scripts"])
+
+    if local_data:
+        if "scripts" in local_data and isinstance(local_data["scripts"], dict):
+            merged.setdefault("scripts", {})
+            if not isinstance(merged["scripts"], dict):
+                merged["scripts"] = {}
+            merged["scripts"].update(local_data["scripts"])
+        for key, value in local_data.items():
+            if key != "scripts":
+                merged[key] = value
+
+    config = merged
 
     if "paused" not in config:
         config["paused"] = False
@@ -75,10 +126,15 @@ def load_config():
 
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
+    config["scripts"] = _normalize_scripts(config["scripts"], root)
     if not config["scripts"].get("vid_gen"):
         config["scripts"]["vid_gen"] = os.path.join(
             "_system", "scripts", "RunwayVideo.ascr"
         )
+
+    for key, value in list(config.items()):
+        if isinstance(value, str):
+            config[key] = _normalize_path_string(value, root_path=root)
 
     settings_path = os.path.join(root, "_system", "settings.json")
     try:
@@ -310,6 +366,7 @@ class ActionaRunner:
         seen_files = set()
         partial_success = False
         retry_reason = None
+        aborted = False
         stdout_file = None
         stderr_file = None
         timeout_val = (
@@ -339,6 +396,11 @@ class ActionaRunner:
             if heartbeat_callback:
                 heartbeat_callback()
             now = time.time()
+            if CONFIG.get("paused") or CONFIG.get("fleet_paused"):
+                self._terminate_process(proc)
+                retry_reason = "paused"
+                aborted = True
+                break
             if watch_images:
                 current_files = self._list_image_files(landing_zone)
                 for name in current_files:
@@ -395,6 +457,7 @@ class ActionaRunner:
             "stdout": stdout_data,
             "stderr": stderr_data,
             "retry_reason": retry_reason,
+            "aborted": aborted,
         }
 
     def run(
@@ -463,6 +526,9 @@ class ActionaRunner:
                 heartbeat_callback=heartbeat_callback,
                 global_timeout_seconds=timeout_val,
             )
+            if result.get("aborted"): 
+                print(f"🛑 Job {job_name} aborted due to Pause.") 
+                return "aborted"
 
             if result.get("start_failed"):
                 return False
