@@ -643,7 +643,7 @@ class ActionaRunner:
                 return False
             files.sort(key=os.path.getctime)
 
-            for idx, src in enumerate(files[:num_outputs], start=1):
+            for idx, src in enumerate(files, start=1):
                 new_name = f"{job_name}_take{idx:03d}{output_ext}"
                 dest = os.path.join(output_dir, new_name)
                 shutil.move(src, dest)
@@ -1080,8 +1080,14 @@ def process_jobs(config):
                 print("🛑 Video job aborted. Returning job to queue.")
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
+                dest = os.path.join(vid_queue, filename)
+                if os.path.exists(dest):
+                    try:
+                        shutil.rmtree(dest)
+                    except OSError:
+                        pass
                 try:
-                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                    shutil.move(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1103,8 +1109,14 @@ def process_jobs(config):
                 print("🛑 Video job failed. Returning job to queue.")
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
+                dest = os.path.join(vid_queue, filename)
+                if os.path.exists(dest):
+                    try:
+                        shutil.rmtree(dest)
+                    except OSError:
+                        pass
                 try:
-                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                    shutil.move(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1113,8 +1125,14 @@ def process_jobs(config):
                 print("🛑 Preemption requested. Yielding job...")
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
+                dest = os.path.join(vid_queue, filename)
+                if os.path.exists(dest):
+                    try:
+                        shutil.rmtree(dest)
+                    except OSError:
+                        pass
                 try:
-                    shutil.move(job_path, os.path.join(vid_queue, filename))
+                    shutil.move(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1127,7 +1145,13 @@ def process_jobs(config):
             print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
             return False
         try:
-            shutil.move(job_path, os.path.join(archive_path, filename))
+            dest = os.path.join(archive_path, filename)
+            if os.path.exists(dest):
+                try:
+                    shutil.rmtree(dest)
+                except OSError:
+                    pass
+            shutil.move(job_path, dest)
         except OSError as e:
             log_activity(f"❌ ERROR: Failed to move finished job: {e}")
             print(f"❌ ERROR: Failed to move finished job: {e}")
