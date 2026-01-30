@@ -79,7 +79,7 @@ class FleetDispatcher:
                 except OSError:
                     continue
 
-    def _get_idle_workers(self, target_type=None):
+    def _get_idle_workers(self, target_type=None, include_self_id=False):
         hb_dir = self.config.get("heartbeat_path")
         if hb_dir:
             hb_dir = os.path.abspath(os.path.expanduser(hb_dir))
@@ -123,6 +123,19 @@ class FleetDispatcher:
                 if allowed_roles is not None and role not in allowed_roles:
                     continue
                 idle_workers.append(worker_id)
+
+        if include_self_id:
+            self_id = self.config.get("worker_id")
+            self_role = self.config.get("initial_role")
+            self_status = self.config.get("last_status")
+            if (
+                self_id
+                and self_status == "IDLE"
+                and (allowed_roles is None or self_role in allowed_roles)
+            ):
+                if self_id in idle_workers:
+                    idle_workers.remove(self_id)
+                idle_workers.insert(0, self_id)
 
         self.logger(
             f"DEBUG: Active idle workers within 90s window: {len(idle_workers)}"
@@ -315,7 +328,9 @@ class FleetDispatcher:
 
         self.logger(f"DEBUG: Dispatching for role {role}, looking in {source_rel}")
         source_path = self.get_sys_path(source_rel)
-        idle_workers = self._get_idle_workers(target_type=target_type)
+        idle_workers = self._get_idle_workers(
+            target_type=target_type, include_self_id=True
+        )
         self.logger(f"DEBUG: Found {len(idle_workers)} idle workers: {idle_workers}")
         if not idle_workers:
             return

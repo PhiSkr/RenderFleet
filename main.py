@@ -508,6 +508,18 @@ class ActionaRunner:
         heartbeat_callback=None,
         global_timeout=None,
     ):
+        if not is_image:
+            staging_cfg = self.config.get("staging_area", "") or os.path.join(
+                "_system", "staging_area"
+            )
+            staging_area = self.get_sys_path(staging_cfg)
+            try:
+                staging_entries = os.listdir(staging_area)
+            except OSError:
+                staging_entries = []
+            if not staging_entries:
+                print("❌ Actiona aborted: staging_area is empty for video job")
+                return False
         landing_zone_cfg = self.config.get("landing_zone", "")
         landing_zone = self.get_sys_path(landing_zone_cfg)
         flags_dir = self.get_sys_path(os.path.join("_system", "flags"))
@@ -656,6 +668,9 @@ class ActionaRunner:
 
 
 def send_heartbeat(config, status="IDLE", current_job=None):
+    config["last_status"] = status
+    if current_job is not None:
+        config["current_job"] = current_job
     heartbeat = {
         "worker_id": config.get("worker_id"),
         "timestamp": int(time.time()),
@@ -921,7 +936,7 @@ def process_jobs(config):
             lines = []
 
         job_name = os.path.splitext(filename)[0]
-        target_dir = os.path.join(review_path, job_name)
+        target_dir = get_sys_path(os.path.join("03_review_room", job_name))
         os.makedirs(target_dir, exist_ok=True)
         progress_path = os.path.join(target_dir, "progress.json")
         completed = []
@@ -937,11 +952,9 @@ def process_jobs(config):
             log_activity(f"❌ ERROR: Could not load progress.json: {e}")
             completed = []
 
+        prompts = [line.strip() for line in lines if line.strip()]
         prompt_index = 0
-        for line in lines:
-            prompt = line.strip()
-            if not prompt:
-                continue
+        for prompt in prompts:
             prompt_index += 1
             prompt_job_name = f"{job_name}_p{prompt_index}"
             if prompt_job_name in completed:
@@ -990,6 +1003,8 @@ def process_jobs(config):
                 except OSError:
                     pass
                 return True
+        if len(completed) < len(prompts):
+            return True
         os.makedirs(review_path, exist_ok=True)
         if not os.path.exists(job_path):
             print(f"⚠️ Job file disappeared (stolen by dispatcher?): {job_path}")
@@ -997,8 +1012,8 @@ def process_jobs(config):
         try:
             shutil.move(job_path, os.path.join(target_dir, filename))
         except OSError as e:
-            log_activity(f"❌ ERROR: Failed to move finished job: {e}")
-            print(f"❌ ERROR: Failed to move finished job: {e}")
+            log_activity(f"⚠️ WARNING: Failed to move finished job: {e}")
+            print(f"⚠️ WARNING: Failed to move finished job: {e}")
             return True
         print(f"✅ Job finished: {filename}")
         log_activity(f"✅ Job finished: {filename}")
@@ -1058,6 +1073,26 @@ def process_jobs(config):
             try:
                 shutil.copy2(image_path, os.path.join(staging_area, image_name))
             except OSError:
+                continue
+
+            prompt_path = os.path.join(staging_prompts, "current_prompt.txt")
+            try:
+                with open(prompt_path, "w", encoding="utf-8") as f:
+                    f.write(prompt_text)
+                    f.flush()
+                    os.fsync(f.fileno())
+            except OSError:
+                pass
+
+            if not os.path.exists(os.path.join(staging_area, image_name)) or not os.path.exists(
+                prompt_path
+            ):
+                log_activity(
+                    f"❌ CRITICAL: Missing staging inputs for {image_name}; skipping."
+                )
+                print(
+                    f"❌ CRITICAL: Missing staging inputs for {image_name}; skipping."
+                )
                 continue
 
             print(f"unknown staging image: {image_name}")
@@ -1276,9 +1311,10 @@ def main():
                 time.sleep(2)
                 continue
             did_work = process_jobs(CONFIG)
+            send_heartbeat(CONFIG, status="IDLE")
+            time.sleep(0.5)
             if did_work:
                 continue
-            send_heartbeat(CONFIG, status="IDLE")
             time.sleep(5)
     except KeyboardInterrupt:
         print("\n🛑 Worker stopping...")
