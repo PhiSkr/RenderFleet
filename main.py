@@ -1034,12 +1034,23 @@ def process_jobs(config):
                         os.remove(path)
                     except OSError:
                         pass
+            for entry in os.listdir(staging_prompts):
+                path = os.path.join(staging_prompts, entry)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
             try:
                 shutil.copy2(image_path, os.path.join(staging_area, image_name))
             except OSError:
                 continue
 
             print(f"unknown staging image: {image_name}")
+            image_job_id = f"{filename}/{image_name}"
+            image_hb_callback = lambda: send_heartbeat(
+                config, status="BUSY", current_job=image_job_id
+            )
             success = runner.run(
                 "vid_gen",
                 prompt_text,
@@ -1048,9 +1059,11 @@ def process_jobs(config):
                 output_ext=".mp4",
                 num_outputs=2,
                 prompt_text=prompt_text,
-                heartbeat_callback=hb_callback,
+                heartbeat_callback=image_hb_callback,
                 global_timeout=45 * 60,
             )
+            if success == "aborted":
+                return True
             if success:
                 completed.append(image_name)
                 try:
@@ -1077,6 +1090,8 @@ def process_jobs(config):
                     pass
                 return True
 
+        if not all(image_name in completed for image_name in images):
+            return True
         archive_path = get_sys_path("04_archive")
         os.makedirs(archive_path, exist_ok=True)
         if not os.path.exists(job_path):
