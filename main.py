@@ -88,8 +88,6 @@ def load_config():
             if isinstance(settings, dict):
                 if "weights" in settings:
                     config["weights"] = settings["weights"]
-                if "paused" in settings:
-                    config["paused"] = settings["paused"]
         else:
             os.makedirs(os.path.dirname(settings_path), exist_ok=True)
             with open(settings_path, "w", encoding="utf-8") as f:
