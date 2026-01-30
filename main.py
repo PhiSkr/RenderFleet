@@ -161,8 +161,11 @@ def load_config():
         config["command_path"] = os.path.join("_system", "commands")
     if "heartbeat_path" not in config:
         config["heartbeat_path"] = os.path.join("_system", "heartbeats")
+    if "staging_prompts" not in config:
+        config["staging_prompts"] = os.path.join("_system", "staging_prompts")
     for key in ("inbox_path", "command_path", "heartbeat_path"):
         config[key] = get_sys_path(config[key])
+    config["staging_prompts"] = get_sys_path(config["staging_prompts"])
 
     if "scripts" not in config:
         raise KeyError("scripts missing from merged config")
@@ -534,15 +537,13 @@ class ActionaRunner:
             self._clear_dir_files(landing_zone)
 
             staging_prompts_cfg = self.config.get("staging_prompts") or os.path.join(
-                "~/RenderFleet", "_system", "staging_prompts"
+                "_system", "staging_prompts"
             )
-            staging_prompts = os.path.abspath(
-                os.path.expanduser(staging_prompts_cfg)
-            )
-            os.makedirs(staging_prompts, exist_ok=True)
+            staging_prompts = get_sys_path(staging_prompts_cfg)
             prompt_path = os.path.join(staging_prompts, "current_prompt.txt")
             prompt_text = "" if arguments is None else str(arguments)
-            print(f"DEBUG: Full prompt path: {os.path.abspath(prompt_path)}")
+            os.makedirs(os.path.dirname(prompt_path), exist_ok=True)
+            print(f"🚨 PROMPT TARGET: {prompt_path}")
             print(f"📄 Writing prompt to current_prompt.txt: '{prompt_text}'")
             try:
                 with open(prompt_path, "w", encoding="utf-8") as f:
