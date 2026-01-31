@@ -231,6 +231,15 @@ def log_activity(msg):
         pass
 
 
+def safe_move_dir(src, dst):
+    if os.path.exists(dst):
+        try:
+            shutil.rmtree(dst)
+        except OSError:
+            pass
+    shutil.move(src, dst)
+
+
 class ActionaRunner:
     GLOBAL_TIMEOUT_SECONDS = 30 * 60
     INTER_IMAGE_TIMEOUT_SECONDS = 5 * 60
@@ -1046,7 +1055,7 @@ def process_jobs(config):
             os.makedirs(error_path, exist_ok=True)
             dest = os.path.join(error_path, filename)
             try:
-                shutil.move(job_path, dest)
+                safe_move_dir(job_path, dest)
             except OSError:
                 pass
             return True
@@ -1134,13 +1143,8 @@ def process_jobs(config):
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
                 dest = os.path.join(vid_queue, filename)
-                if os.path.exists(dest):
-                    try:
-                        shutil.rmtree(dest)
-                    except OSError:
-                        pass
                 try:
-                    shutil.move(job_path, dest)
+                    safe_move_dir(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1163,13 +1167,8 @@ def process_jobs(config):
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
                 dest = os.path.join(vid_queue, filename)
-                if os.path.exists(dest):
-                    try:
-                        shutil.rmtree(dest)
-                    except OSError:
-                        pass
                 try:
-                    shutil.move(job_path, dest)
+                    safe_move_dir(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1179,13 +1178,8 @@ def process_jobs(config):
                 vid_queue = get_sys_path(os.path.join("01_job_factory", "vid_queue"))
                 os.makedirs(vid_queue, exist_ok=True)
                 dest = os.path.join(vid_queue, filename)
-                if os.path.exists(dest):
-                    try:
-                        shutil.rmtree(dest)
-                    except OSError:
-                        pass
                 try:
-                    shutil.move(job_path, dest)
+                    safe_move_dir(job_path, dest)
                 except OSError:
                     pass
                 return True
@@ -1199,12 +1193,7 @@ def process_jobs(config):
             return False
         try:
             dest = os.path.join(archive_path, filename)
-            if os.path.exists(dest):
-                try:
-                    shutil.rmtree(dest)
-                except OSError:
-                    pass
-            shutil.move(job_path, dest)
+            safe_move_dir(job_path, dest)
         except OSError as e:
             log_activity(f"❌ ERROR: Failed to move finished job: {e}")
             print(f"❌ ERROR: Failed to move finished job: {e}")
@@ -1290,7 +1279,11 @@ def dispatch_jobs(config):
     worker_id = idle_workers[0]
     inbox_path = get_sys_path(os.path.join("02_active_floor", worker_id, "inbox"))
     os.makedirs(inbox_path, exist_ok=True)
-    shutil.move(job_path, os.path.join(inbox_path, filename))
+    dest = os.path.join(inbox_path, filename)
+    if os.path.isdir(job_path):
+        safe_move_dir(job_path, dest)
+    else:
+        shutil.move(job_path, dest)
     print(f"CMD: Dispatched {filename} to {worker_id}")
 
 

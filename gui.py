@@ -229,6 +229,11 @@ class RenderFleetApp(ctk.CTk):
         )
         self.img_weight_menu.set("default")
         self.img_weight_menu.pack(side="left")
+        self.img_vip_var = ctk.BooleanVar(value=False)
+        self.img_vip_checkbox = ctk.CTkCheckBox(
+            weights_row, text="VIP / Urgent", variable=self.img_vip_var
+        )
+        self.img_vip_checkbox.pack(side="left", padx=(12, 0))
 
         self.job_name_entry = ctk.CTkEntry(form, placeholder_text="JobName (e.g. project_alpha)")
         self.job_name_entry.pack(fill="x", padx=12, pady=(12, 6))
@@ -307,6 +312,8 @@ class RenderFleetApp(ctk.CTk):
         base_name = f"{job_name}_{job_id}" if job_id else job_name
         if weight_key:
             base_name = f"{weight_key}_{base_name}"
+        if self.img_vip_var.get():
+            base_name = f"{base_name}_VIP"
         filename = f"{base_name}.txt"
         target_dir = os.path.join(self.syncthing_root, "01_job_factory", "img_queue")
         os.makedirs(target_dir, exist_ok=True)
@@ -367,6 +374,11 @@ class RenderFleetApp(ctk.CTk):
         )
         self.vid_weight_menu.set("default")
         self.vid_weight_menu.pack(side="left")
+        self.vid_vip_var = ctk.BooleanVar(value=False)
+        self.vid_vip_checkbox = ctk.CTkCheckBox(
+            weights_row, text="VIP / Urgent", variable=self.vid_vip_var
+        )
+        self.vid_vip_checkbox.pack(side="left", padx=(12, 0))
 
         self.video_mode_tabs = ctk.CTkTabview(right)
         self.video_mode_tabs.pack(fill="both", expand=True, padx=12, pady=6)
@@ -457,6 +469,12 @@ class RenderFleetApp(ctk.CTk):
         self.selected_review_folder = os.path.join(
             self.syncthing_root, "03_review_room", "_ready", folder_name
         )
+        weight_keys = self._get_weight_keys()
+        for key in sorted(weight_keys, key=len, reverse=True):
+            if folder_name.startswith(f"{key}_"):
+                if hasattr(self, "vid_weight_menu"):
+                    self.vid_weight_menu.set(key)
+                break
         image_count = 0
         images = []
         if os.path.isdir(self.selected_review_folder):
@@ -562,6 +580,65 @@ class RenderFleetApp(ctk.CTk):
         else:
             prompt_map = {fname: self.mapping_data.get(fname, "") for fname in image_files}
 
+        rename_pairs = []
+        for idx, old_name in enumerate(image_files, start=1):
+            ext = os.path.splitext(old_name)[1].lower()
+            new_name = f"image_{idx:03d}{ext}"
+            rename_pairs.append((old_name, new_name))
+
+        temp_pairs = []
+        for old_name, new_name in rename_pairs:
+            if old_name == new_name:
+                continue
+            temp_name = f"__rf_tmp_{new_name}"
+            temp_pairs.append((old_name, temp_name, new_name))
+            try:
+                os.rename(
+                    os.path.join(self.selected_review_folder, old_name),
+                    os.path.join(self.selected_review_folder, temp_name),
+                )
+            except OSError:
+                self._show_video_feedback("Failed to rename images.", is_error=True)
+                return
+            old_txt = os.path.splitext(old_name)[0] + ".txt"
+            tmp_txt = os.path.splitext(temp_name)[0] + ".txt"
+            if os.path.exists(os.path.join(self.selected_review_folder, old_txt)):
+                try:
+                    os.rename(
+                        os.path.join(self.selected_review_folder, old_txt),
+                        os.path.join(self.selected_review_folder, tmp_txt),
+                    )
+                except OSError:
+                    self._show_video_feedback("Failed to rename prompt files.", is_error=True)
+                    return
+
+        for _old_name, temp_name, new_name in temp_pairs:
+            try:
+                os.rename(
+                    os.path.join(self.selected_review_folder, temp_name),
+                    os.path.join(self.selected_review_folder, new_name),
+                )
+            except OSError:
+                self._show_video_feedback("Failed to finalize image renames.", is_error=True)
+                return
+            tmp_txt = os.path.splitext(temp_name)[0] + ".txt"
+            new_txt = os.path.splitext(new_name)[0] + ".txt"
+            if os.path.exists(os.path.join(self.selected_review_folder, tmp_txt)):
+                try:
+                    os.rename(
+                        os.path.join(self.selected_review_folder, tmp_txt),
+                        os.path.join(self.selected_review_folder, new_txt),
+                    )
+                except OSError:
+                    self._show_video_feedback("Failed to finalize prompt renames.", is_error=True)
+                    return
+
+        prompt_map = {
+            new_name: prompt_map.get(old_name, "")
+            for old_name, new_name in rename_pairs
+        }
+        image_files = [new_name for _old_name, new_name in rename_pairs]
+
         for fname in image_files:
             base, _ext = os.path.splitext(fname)
             txt_path = os.path.join(self.selected_review_folder, f"{base}.txt")
@@ -574,8 +651,10 @@ class RenderFleetApp(ctk.CTk):
 
         weight_key = self.vid_weight_menu.get() if hasattr(self, "vid_weight_menu") else "default"
         folder_name = os.path.basename(self.selected_review_folder)
-        if weight_key:
+        if weight_key and not folder_name.startswith(f"{weight_key}_"):
             folder_name = f"{weight_key}_{folder_name}"
+        if self.vid_vip_var.get() and "VIP" not in folder_name:
+            folder_name = f"{folder_name}_VIP"
         target_dir = os.path.join(self.syncthing_root, "01_job_factory", "vid_queue")
         os.makedirs(target_dir, exist_ok=True)
         try:

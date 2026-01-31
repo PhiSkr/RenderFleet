@@ -14,6 +14,14 @@ class FleetDispatcher:
         self.deficits = {}
         self.current_index = {}
 
+    def _safe_move_dir(self, src, dst):
+        if os.path.exists(dst):
+            try:
+                shutil.rmtree(dst)
+            except OSError:
+                pass
+        shutil.move(src, dst)
+
     def _load_weights(self):
         root = self.config.get("syncthing_root") or "~/RenderFleet"
         root = os.path.abspath(os.path.expanduser(root))
@@ -74,7 +82,11 @@ class FleetDispatcher:
                     continue
                 try:
                     os.makedirs(job_queue_path, exist_ok=True)
-                    shutil.move(job_path, os.path.join(job_queue_path, entry))
+                    dest = os.path.join(job_queue_path, entry)
+                    if os.path.isdir(job_path):
+                        self._safe_move_dir(job_path, dest)
+                    else:
+                        shutil.move(job_path, dest)
                     self.logger(f"Recovered job {entry} from dead worker {worker_id}")
                 except OSError:
                     continue
@@ -347,13 +359,44 @@ class FleetDispatcher:
             return
 
         filename = os.path.basename(job_path)
-        worker_id = idle_workers[0]
-        inbox_path = self.get_sys_path(os.path.join("02_active_floor", worker_id, "inbox"))
-        os.makedirs(inbox_path, exist_ok=True)
+        selected_worker = None
+        selected_inbox = None
+        for worker_id in idle_workers:
+            inbox_path = self.get_sys_path(
+                os.path.join("02_active_floor", worker_id, "inbox")
+            )
+            os.makedirs(inbox_path, exist_ok=True)
+            try:
+                inbox_entries = [
+                    name
+                    for name in os.listdir(inbox_path)
+                    if not name.startswith(".")
+                ]
+            except OSError:
+                inbox_entries = []
+            if inbox_entries:
+                self.logger(
+                    f"DEBUG: Skipping {worker_id}; inbox not empty ({len(inbox_entries)} items)."
+                )
+                continue
+            selected_worker = worker_id
+            selected_inbox = inbox_path
+            break
+
+        if not selected_worker:
+            self.logger("DEBUG: No idle workers with empty inbox found.")
+            return
+
         try:
-            self.logger(f"DEBUG: Attempting to move {filename} to {inbox_path}")
-            shutil.move(job_path, os.path.join(inbox_path, filename))
-            self.logger(f"CMD: Dispatched {filename} to {worker_id}")
+            self.logger(
+                f"DEBUG: Attempting to move {filename} to {selected_inbox}"
+            )
+            dest = os.path.join(selected_inbox, filename)
+            if os.path.isdir(job_path):
+                self._safe_move_dir(job_path, dest)
+            else:
+                shutil.move(job_path, dest)
+            self.logger(f"CMD: Dispatched {filename} to {selected_worker}")
         except Exception as e:
             self.logger(f"❌ DISPATCH ERROR: Failed to move {filename}. Reason: {e}")
             return
