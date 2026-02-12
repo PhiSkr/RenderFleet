@@ -16,10 +16,10 @@ class FleetDispatcher:
 
     def _safe_move_dir(self, src, dst):
         if os.path.exists(dst):
-            try:
+            if os.path.isdir(dst):
                 shutil.rmtree(dst)
-            except OSError:
-                pass
+            else:
+                os.remove(dst)
         shutil.move(src, dst)
 
     def _load_weights(self):
@@ -80,10 +80,22 @@ class FleetDispatcher:
                 job_path = os.path.join(inbox_path, entry)
                 if not (os.path.isfile(job_path) or os.path.isdir(job_path)):
                     continue
+                is_dir = os.path.isdir(job_path)
+                is_file = os.path.isfile(job_path)
+                queue_name = os.path.basename(job_queue_path)
+                if is_dir and queue_name != "vid_queue":
+                    continue
+                if is_file and queue_name != "img_queue":
+                    continue
                 try:
                     os.makedirs(job_queue_path, exist_ok=True)
                     dest = os.path.join(job_queue_path, entry)
-                    if os.path.isdir(job_path):
+                    if os.path.exists(dest):
+                        if os.path.isdir(dest):
+                            shutil.rmtree(dest)
+                        else:
+                            os.remove(dest)
+                    if is_dir:
                         self._safe_move_dir(job_path, dest)
                     else:
                         shutil.move(job_path, dest)

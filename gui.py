@@ -5,6 +5,7 @@ import time
 import glob
 from datetime import datetime
 import shutil
+import re
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
@@ -395,13 +396,13 @@ class RenderFleetApp(ctk.CTk):
 
         self.manual_prompt_entries = {}
 
-        self.mapping_data = {}
         self.mapping_button = ctk.CTkButton(mapping_tab, text="Load Mapping File", command=self._load_mapping_file)
         self.mapping_button.pack(fill="x", padx=10, pady=(10, 6))
         self.mapping_status = ctk.CTkLabel(mapping_tab, text="No mapping loaded.")
         self.mapping_status.pack(anchor="w", padx=10, pady=(0, 6))
-        self.mapping_preview = ctk.CTkTextbox(mapping_tab, height=120)
-        self.mapping_preview.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.mapping_input = ctk.CTkTextbox(mapping_tab, height=120)
+        self.mapping_input.configure(state="normal")
+        self.mapping_input.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         self.video_stats_label = ctk.CTkLabel(right, text="Stats: 0 Images found")
         self.video_stats_label.pack(anchor="w", padx=12, pady=6)
@@ -512,46 +513,47 @@ class RenderFleetApp(ctk.CTk):
         )
         if not file_path:
             return
-        mapping = {}
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.read().splitlines()
         except OSError:
             lines = []
 
-        for line in lines:
-            if "=" not in line:
-                continue
-            name, prompt = line.split("=", 1)
-            name = name.strip()
-            prompt = prompt.strip()
-            if name:
-                mapping[name] = prompt
-
-        self.mapping_data = mapping
-        self.mapping_status.configure(text=f"Loaded {len(mapping)} mappings.")
-        self._update_mapping_preview()
+        try:
+            self.mapping_input.delete("1.0", "end")
+            self.mapping_input.insert("1.0", "\n".join(lines))
+        except Exception:
+            pass
+        self.mapping_status.configure(text=f"Loaded {len(lines)} lines.")
 
     def _update_mapping_preview(self):
-        if not hasattr(self, "mapping_preview"):
-            return
-        self.mapping_preview.delete("1.0", "end")
-        if not self.selected_images:
-            self.mapping_preview.insert("end", "Select a folder to preview mapping matches.\n")
-            return
-        if not self.mapping_data:
-            self.mapping_preview.insert("end", "No mapping loaded.\n")
-            return
-        matches = []
-        for fname in self.selected_images:
-            if fname in self.mapping_data:
-                matches.append(f"{fname} = {self.mapping_data[fname]}")
-        self.mapping_preview.insert(
-            "end",
-            f"Matched {len(matches)} / {len(self.selected_images)} images\\n\\n",
-        )
-        for line in matches[:20]:
-            self.mapping_preview.insert("end", line + "\\n")
+        return
+
+    def _parse_mapping_from_text(self, text, images):
+        image_numbers = []
+        for name in images:
+            match = re.search(r"\d+", name)
+            if not match:
+                continue
+            image_numbers.append((name, int(match.group())))
+        prompt_map = {}
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or "=" not in line:
+                continue
+            key, prompt = line.split("=", 1)
+            key = key.strip()
+            prompt = prompt.strip()
+            if not key:
+                continue
+            key_match = re.search(r"\d+", key)
+            if not key_match:
+                continue
+            key_number = int(key_match.group())
+            for name, img_number in image_numbers:
+                if img_number == key_number:
+                    prompt_map[name] = prompt
+        return prompt_map
 
     def dispatch_video_job(self):
         if not self.selected_review_folder:
@@ -578,7 +580,10 @@ class RenderFleetApp(ctk.CTk):
                 entry = self.manual_prompt_entries.get(fname)
                 prompt_map[fname] = entry.get().strip() if entry else ""
         else:
-            prompt_map = {fname: self.mapping_data.get(fname, "") for fname in image_files}
+            mapping_text = ""
+            if hasattr(self, "mapping_input"):
+                mapping_text = self.mapping_input.get("1.0", "end")
+            prompt_map = self._parse_mapping_from_text(mapping_text, image_files)
 
         rename_pairs = []
         for idx, old_name in enumerate(image_files, start=1):

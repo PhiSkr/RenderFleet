@@ -233,10 +233,10 @@ def log_activity(msg):
 
 def safe_move_dir(src, dst):
     if os.path.exists(dst):
-        try:
+        if os.path.isdir(dst):
             shutil.rmtree(dst)
-        except OSError:
-            pass
+        else:
+            os.remove(dst)
     shutil.move(src, dst)
 
 
@@ -1193,6 +1193,11 @@ def process_jobs(config):
             return False
         try:
             dest = os.path.join(archive_path, filename)
+            if os.path.exists(dest):
+                if os.path.isdir(dest):
+                    shutil.rmtree(dest)
+                else:
+                    os.remove(dest)
             safe_move_dir(job_path, dest)
         except OSError as e:
             log_activity(f"❌ ERROR: Failed to move finished job: {e}")
